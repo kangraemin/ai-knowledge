@@ -47,11 +47,16 @@ else
   cp "$SCRIPT_DIR/hooks/session-start-learnings.sh" "$HOOK_DEST"
   chmod +x "$HOOK_DEST"
 
-  # settings.json SessionStart 배열에 훅 추가
+  # settings.json 백업
+  cp "$SETTINGS" "$SETTINGS.bak"
+
+  # SessionStart 배열에 훅 추가 (없으면 배열 생성)
   HOOK_JSON="{\"hooks\":[{\"type\":\"command\",\"command\":\"$HOOK_DEST\",\"timeout\":5}]}"
-  jq --argjson hook "$HOOK_JSON" '.hooks.SessionStart += [$hook]' "$SETTINGS" > "$SETTINGS.tmp"
-  mv "$SETTINGS.tmp" "$SETTINGS"
-  echo "  SessionStart 훅 등록"
+  jq --argjson hook "$HOOK_JSON" \
+    '.hooks.SessionStart = (.hooks.SessionStart // []) + [$hook]' \
+    "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+
+  echo "  SessionStart 훅 등록 (백업: settings.json.bak)"
 fi
 
 echo ""
