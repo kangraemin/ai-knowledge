@@ -8,9 +8,13 @@ SETTINGS="$CLAUDE_DIR/settings.json"
 HOOK_DEST="$CLAUDE_DIR/hooks/library-sync.sh"
 
 # 로컬 실행인지 curl 실행인지 판단
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)"
-USE_LOCAL=false
-[ -f "$SCRIPT_DIR/templates/LIBRARY.md" ] && USE_LOCAL=true
+if [[ "${BASH_SOURCE[0]}" == /dev/fd/* ]]; then
+  USE_LOCAL=false
+  SCRIPT_DIR=""
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  USE_LOCAL=true
+fi
 
 fetch() {
   local path="$1"
