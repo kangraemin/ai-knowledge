@@ -3,22 +3,31 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET="${1:-$(pwd)}"
-SETTINGS="$HOME/.claude/settings.json"
-HOOK_DEST="$HOME/.claude/hooks/session-start-learnings.sh"
 
 echo "learnings-for-claude: $TARGET 에 설치 중..."
 
-# 1. LEARNINGS.md 생성
-if [ -f "$TARGET/LEARNINGS.md" ]; then
-  echo "  LEARNINGS.md 이미 존재 — 스킵"
+# 1. LIBRARY.md 생성
+if [ -f "$TARGET/LIBRARY.md" ]; then
+  echo "  LIBRARY.md 이미 존재 — 스킵"
 else
-  cp "$SCRIPT_DIR/templates/LEARNINGS.md" "$TARGET/LEARNINGS.md"
-  echo "  LEARNINGS.md 생성"
+  cp "$SCRIPT_DIR/templates/LIBRARY.md" "$TARGET/LIBRARY.md"
+  echo "  LIBRARY.md 생성"
 fi
 
-# 2. 프로젝트 CLAUDE.md에 규칙 추가
+# 2. library/ 구조 생성
+if [ -d "$TARGET/library" ]; then
+  echo "  library/ 이미 존재 — 스킵"
+else
+  mkdir -p "$TARGET/library/entries"
+  cp "$SCRIPT_DIR/templates/library/dead-ends.md" "$TARGET/library/dead-ends.md"
+  cp "$SCRIPT_DIR/templates/library/principles.md" "$TARGET/library/principles.md"
+  cp "$SCRIPT_DIR/templates/library/entries/_template.md" "$TARGET/library/entries/_template.md"
+  echo "  library/ 구조 생성"
+fi
+
+# 3. 프로젝트 CLAUDE.md에 규칙 추가
 CLAUDE_MD="$TARGET/CLAUDE.md"
-MARKER="## Learnings 시스템"
+MARKER="## Library 시스템"
 
 if [ -f "$CLAUDE_MD" ] && grep -qF "$MARKER" "$CLAUDE_MD"; then
   echo "  CLAUDE.md 규칙 이미 존재 — 스킵"
@@ -28,39 +37,14 @@ else
   echo "  CLAUDE.md 규칙 추가"
 fi
 
-# 3. 글로벌 learnings 디렉토리 생성
-GLOBAL_DIR="$HOME/.claude/learnings"
+# 4. 글로벌 library 디렉토리 생성
+GLOBAL_DIR="$HOME/.claude/library"
 if [ ! -d "$GLOBAL_DIR" ]; then
-  mkdir -p "$GLOBAL_DIR"
-  cp "$SCRIPT_DIR/global/_template.md" "$GLOBAL_DIR/_template.md"
-  echo "  ~/.claude/learnings/ 생성"
+  mkdir -p "$GLOBAL_DIR/entries"
+  cp "$SCRIPT_DIR/templates/library/entries/_template.md" "$GLOBAL_DIR/entries/_template.md"
+  echo "  ~/.claude/library/ 생성"
 else
-  echo "  ~/.claude/learnings/ 이미 존재 — 스킵"
-fi
-
-# 4. SessionStart 훅 설치 (jq 필요)
-if ! command -v jq &>/dev/null; then
-  echo "  경고: jq 없음 — SessionStart 훅 스킵 (brew install jq 후 재설치 권장)"
-elif grep -qF "session-start-learnings" "$SETTINGS" 2>/dev/null; then
-  echo "  SessionStart 훅 이미 존재 — 스킵"
-else
-  mkdir -p "$(dirname "$HOOK_DEST")"
-  cp "$SCRIPT_DIR/hooks/session-start-learnings.sh" "$HOOK_DEST"
-  chmod +x "$HOOK_DEST"
-
-  # settings.json 백업 (있는 경우만)
-  if [ -f "$SETTINGS" ]; then
-    cp "$SETTINGS" "$SETTINGS.bak"
-  else
-    echo "{\"hooks\":{}}" > "$SETTINGS"
-  fi
-
-  HOOK_JSON="{\"hooks\":[{\"type\":\"command\",\"command\":\"$HOOK_DEST\",\"timeout\":5}]}"
-  jq --argjson hook "$HOOK_JSON" \
-    '.hooks.SessionStart = (.hooks.SessionStart // []) + [$hook]' \
-    "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
-
-  echo "  SessionStart 훅 등록 (백업: settings.json.bak)"
+  echo "  ~/.claude/library/ 이미 존재 — 스킵"
 fi
 
 echo ""
