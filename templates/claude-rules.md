@@ -21,6 +21,12 @@
 3. 지식 파일 생성: 내용을 설명하는 이름 (날짜 없음)
 4. 주제 `index.md` 생성/업데이트
 5. `~/.claude/.claude-library/LIBRARY.md` 업데이트
-6. 한 줄로 알린다: `📚 library에 추가: [경로]`
+6. 즉시 commit/push:
+   ```
+   git -C ~/.claude/.claude-library add -A
+   git -C ~/.claude/.claude-library commit -m "feat: [주제] 추가"
+   git -C ~/.claude/.claude-library push
+   ```
+7. 한 줄로 알린다: `📚 library에 추가: [경로]`
 
 미결 상태는 기록하지 않는다.
