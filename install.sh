@@ -328,6 +328,34 @@ EOF
   echo "  SessionStart 자동 업데이트 체크 등록"
 fi
 
+# --- update-learnings 스킬 설치 ---
+SKILL_DIR="$CLAUDE_DIR/skills/update-learnings"
+if [ -d "$SKILL_DIR" ]; then
+  echo "  update-learnings 스킬 이미 존재 — 스킵"
+else
+  mkdir -p "$SKILL_DIR"
+  cat > "$SKILL_DIR/SKILL.md" << 'EOF'
+---
+description: learnings-for-claude 최신 버전 확인 및 업데이트
+---
+
+# /update-learnings
+
+## 플로우
+
+1. update-check.sh 경로 탐색:
+   - `~/.claude/hooks/learnings-update-check.sh`
+   - 없으면 "learnings-update-check.sh를 찾을 수 없습니다. install.sh를 먼저 실행하세요." 출력 후 종료
+2. `bash "~/.claude/hooks/learnings-update-check.sh" --check-only` 로 현재/최신 버전 확인
+3. 결과 출력:
+   - `up-to-date` → "최신 버전입니다 (SHA)" 출력 후 종료
+   - `update-available` → 현재/최신 SHA 보여주고 업데이트 여부 확인
+4. 업데이트 확인 시 `bash "~/.claude/hooks/learnings-update-check.sh" --force` 실행
+5. 완료 메시지 출력
+EOF
+  echo "  update-learnings 스킬 설치"
+fi
+
 echo ""
 echo "완료."
 echo "  library: ~/.claude/.claude-library/library/"
