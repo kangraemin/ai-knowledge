@@ -66,6 +66,10 @@ case "$git_choice" in
   3|4)
     printf "  private repo URL을 입력하세요: "
     read -r repo_url </dev/tty
+    if [ -z "$repo_url" ]; then
+      echo "  오류: repo URL을 입력해야 합니다. 설치를 중단합니다."
+      exit 1
+    fi
     git -C "$LIB_DIR" init -q
     git -C "$LIB_DIR" remote add origin "$repo_url"
     git -C "$LIB_DIR" add -A
