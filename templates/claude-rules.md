@@ -16,7 +16,7 @@
 - 더 나은 방법을 발견했을 때
 
 기록 방법:
-1. 카테고리 판단 (quant, ml, claude, macro 등)
+1. 카테고리 판단 (equity, crypto, ml, macro, claude 등)
 2. 주제 폴더 확인/생성: `~/.claude/.claude-library/library/[카테고리]/[주제]/`
 3. 지식 파일 생성: 내용을 설명하는 이름 (날짜 없음)
 4. 주제 `index.md` 생성/업데이트
