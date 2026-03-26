@@ -1,29 +1,10 @@
 #!/bin/bash
 set -e
 
-REPO="https://raw.githubusercontent.com/kangraemin/learnings-for-claude/main"
 CLAUDE_DIR="$HOME/.claude"
 LIB_DIR="$CLAUDE_DIR/.claude-library"
 SETTINGS="$CLAUDE_DIR/settings.json"
 HOOK_DEST="$CLAUDE_DIR/hooks/library-sync.sh"
-
-# 로컬 실행인지 curl 실행인지 판단
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
-if [ -d "$SCRIPT_DIR/templates" ]; then
-  USE_LOCAL=true
-else
-  USE_LOCAL=false
-fi
-
-fetch() {
-  local path="$1"
-  local dest="$2"
-  if [ "$USE_LOCAL" = true ]; then
-    cp "$SCRIPT_DIR/$path" "$dest"
-  else
-    curl -fsSL "$REPO/$path" -o "$dest"
-  fi
-}
 
 echo "learnings-for-claude 설치 중..."
 echo ""
@@ -53,9 +34,85 @@ echo ""
 # --- .claude-library/ 구조 생성 ---
 mkdir -p "$LIB_DIR/library"
 
-[ -f "$LIB_DIR/LIBRARY.md" ]           || fetch "templates/LIBRARY.md" "$LIB_DIR/LIBRARY.md"
-[ -f "$LIB_DIR/GUIDE.md" ]             || fetch "GUIDE.md" "$LIB_DIR/GUIDE.md"
-[ -f "$LIB_DIR/library/_template.md" ] || fetch "templates/library/_template.md" "$LIB_DIR/library/_template.md"
+if [ ! -f "$LIB_DIR/LIBRARY.md" ]; then
+  cat > "$LIB_DIR/LIBRARY.md" << 'EOF'
+# Library
+
+> 작업에서 도출된 지식 저장소.
+> 실험/작업 전 관련 항목이 있는지 확인하고, 필요한 파일만 읽는다.
+
+| 날짜 | 제목 | 결론 | 파일 |
+|------|------|------|------|
+EOF
+fi
+
+if [ ! -f "$LIB_DIR/GUIDE.md" ]; then
+  cat > "$LIB_DIR/GUIDE.md" << 'EOF'
+# Library 작성 가이드
+
+## 언제 기록하나
+
+- 실험/백테스트 결론이 났을 때
+- 링크/아티클에서 유효한 인사이트를 얻었을 때
+- 사용자가 수정을 요청했을 때 (접근법이 틀렸을 때)
+- 더 나은 방법을 발견했을 때
+- 세션 종료/compact 시 — 위 경우를 놓쳤다면 그때 정리
+
+## 파일명 규칙
+
+YYYY-MM-DD-[주제]-[결론].md
+
+예)
+2026-03-07-피보나치-안됨.md
+2026-03-20-gld-방어-유효.md
+
+## 제목 규칙
+
+- 한 줄로, 결론이 바로 보이게
+- "~는 안 된다" / "~는 유효하다" 형식 권장
+
+## 결론 판단 기준
+
+- 유효: 데이터/실험/복수 소스로 확인됨
+- 안됨: 데이터/실험으로 효과 없음 확인됨
+- 미결: 아직 판단 불가 → library에 기록하지 않는다
+
+## 파일 템플릿
+
+_template.md 참고
+
+## LIBRARY.md 업데이트
+
+파일 추가할 때 LIBRARY.md에 한 줄 동시 추가:
+
+| 날짜 | 제목 | 결론 | 파일 |
+|------|------|------|------|
+| 2026-03-07 | 피보나치 되돌림 | 안됨 | [링크](library/2026-03-07-피보나치-안됨.md) |
+
+## 하지 말 것
+
+- 미결 상태로 기록하지 않는다
+- 결론 없이 "흥미롭다"만 기록하지 않는다
+- 오타/포맷 수정은 기록하지 않는다
+EOF
+fi
+
+if [ ! -f "$LIB_DIR/library/_template.md" ]; then
+  cat > "$LIB_DIR/library/_template.md" << 'EOF'
+# [제목]
+
+- 날짜: YYYY-MM-DD
+- 출처: [실험명 / 링크 / 경험]
+- 결론: 유효 / 안됨
+
+## 근거
+왜 이 결론인지. 데이터나 상황.
+
+## 적용
+앞으로 어떻게 행동할지. 예외 조건이 있다면 명시.
+EOF
+fi
+
 echo "  ~/.claude/.claude-library/ 생성"
 
 # --- git 설정 ---
@@ -90,10 +147,12 @@ if [ "$NEED_REPO" = true ]; then
     echo "  오류: repo URL을 입력해야 합니다. 설치를 중단합니다."
     exit 1
   fi
-  git -C "$LIB_DIR" init -q
-  git -C "$LIB_DIR" remote add origin "$repo_url"
+  if [ ! -d "$LIB_DIR/.git" ]; then
+    git -C "$LIB_DIR" init -q
+    git -C "$LIB_DIR" remote add origin "$repo_url"
+  fi
   git -C "$LIB_DIR" add -A
-  git -C "$LIB_DIR" commit -q -m "feat: learnings-for-claude 초기 설정"
+  git -C "$LIB_DIR" commit -q -m "feat: learnings-for-claude 초기 설정" 2>/dev/null || true
   git -C "$LIB_DIR" push -u origin HEAD
   echo "  private repo 설정 완료"
 fi
@@ -101,18 +160,36 @@ fi
 # --- ~/.claude/CLAUDE.md에 규칙 추가 ---
 GLOBAL_CLAUDE="$CLAUDE_DIR/CLAUDE.md"
 MARKER="## Library 시스템"
-RULES_TMP="$(mktemp)"
-
-fetch "templates/claude-rules.md" "$RULES_TMP"
 
 if [ -f "$GLOBAL_CLAUDE" ] && grep -qF "$MARKER" "$GLOBAL_CLAUDE"; then
   echo "  ~/.claude/CLAUDE.md 규칙 이미 존재 — 스킵"
 else
-  echo "" >> "$GLOBAL_CLAUDE"
-  cat "$RULES_TMP" >> "$GLOBAL_CLAUDE"
+  cat >> "$GLOBAL_CLAUDE" << 'EOF'
+
+## Library 시스템
+
+참조: `~/.claude/.claude-library/GUIDE.md`
+
+### 읽기
+- 새 실험/전략 제안 전, 막히는 상황에서 `~/.claude/.claude-library/LIBRARY.md`를 읽는다
+- 관련 항목이 있으면 해당 파일만 읽는다
+- 이미 기록된 방향은 재제안하지 않는다
+
+### 쓰기
+아래 경우 조용히 library에 기록한다 (사용자에게 말하지 않는다):
+- 실험/백테스트 결론이 났을 때
+- 링크/아티클에서 유효한 인사이트를 얻었을 때
+- 사용자가 접근법을 수정했을 때
+- 더 나은 방법을 발견했을 때
+
+기록 방법:
+1. `~/.claude/.claude-library/library/YYYY-MM-DD-[주제]-[결론].md` 파일 생성
+2. `~/.claude/.claude-library/LIBRARY.md` index에 한 줄 추가
+
+미결 상태는 기록하지 않는다.
+EOF
   echo "  ~/.claude/CLAUDE.md 규칙 추가"
 fi
-rm -f "$RULES_TMP"
 
 # --- SessionEnd / PostCompact 훅 등록 ---
 if ! command -v jq >/dev/null 2>&1; then
@@ -121,7 +198,18 @@ elif grep -qF "library-sync" "$SETTINGS" 2>/dev/null; then
   echo "  훅 이미 존재 — 스킵"
 else
   mkdir -p "$(dirname "$HOOK_DEST")"
-  fetch "hooks/library-sync.sh" "$HOOK_DEST"
+
+  cat > "$HOOK_DEST" << 'EOF'
+#!/bin/bash
+# SessionEnd / PostCompact: library 업데이트 체크
+
+LIBRARY="$HOME/.claude/.claude-library/LIBRARY.md"
+
+[ -f "$LIBRARY" ] || exit 0
+
+claude -p "이번 세션에서 ~/.claude/.claude-library/library/ 에 기록할 만한 결론이 있었는지 확인하고, 있다면 ~/.claude/.claude-library/GUIDE.md 형식에 따라 파일을 추가하고 ~/.claude/.claude-library/LIBRARY.md index를 업데이트해라. 없으면 아무것도 하지 마라." 2>/dev/null || true
+EOF
+
   chmod +x "$HOOK_DEST"
 
   [ -f "$SETTINGS" ] && cp "$SETTINGS" "$SETTINGS.bak" || echo "{\"hooks\":{}}" > "$SETTINGS"
