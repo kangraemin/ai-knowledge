@@ -15,7 +15,7 @@ if git -C "$CLAUDE_DIR" rev-parse --git-dir >/dev/null 2>&1; then
   echo ".claude-library/ 를 어떻게 관리하시겠습니까?"
   echo "  1) git 추적 안 함 (.gitignore에 추가)"
   echo "  2) 기존 ~/.claude repo에 포함"
-  echo "  3) 별도 private repo로 관리 (.gitignore에 추가 + 새 repo 설정)"
+  echo "  3) 별도 private repo로 관리"
   printf "선택 [1/2/3]: "
   read -r git_choice </dev/tty
   IS_GIT=true
@@ -23,7 +23,7 @@ else
   echo "~/.claude 가 git repo가 아닙니다."
   echo ".claude-library/ 를 어떻게 관리하시겠습니까?"
   echo "  1) 로컬만 유지 (git 없음)"
-  echo "  2) 새 private repo 생성"
+  echo "  2) private repo로 관리"
   printf "선택 [1/2]: "
   read -r git_choice </dev/tty
   IS_GIT=false
@@ -147,20 +147,44 @@ if [ "$NEED_GITIGNORE" = true ]; then
 fi
 
 if [ "$NEED_REPO" = true ]; then
+  printf "  기존 private repo가 있나요? [y/n]: "
+  read -r has_existing </dev/tty
   printf "  private repo URL을 입력하세요: "
   read -r repo_url </dev/tty
   if [ -z "$repo_url" ]; then
     echo "  오류: repo URL을 입력해야 합니다. 설치를 중단합니다."
     exit 1
   fi
-  if [ ! -d "$LIB_DIR/.git" ]; then
-    git -C "$LIB_DIR" init -q
-    git -C "$LIB_DIR" remote add origin "$repo_url"
+  if [ "$has_existing" = "y" ] || [ "$has_existing" = "Y" ]; then
+    # 기존 repo → clone 후 템플릿 파일만 보완
+    TMPDIR_INIT=$(mktemp -d)
+    cp -r "$LIB_DIR/." "$TMPDIR_INIT/"  # 방금 생성한 템플릿 임시 보관
+    rm -rf "$LIB_DIR"
+    if git clone -q "$repo_url" "$LIB_DIR" 2>/dev/null; then
+      # 기존 repo에 없는 파일만 보완
+      [ -f "$LIB_DIR/GUIDE.md" ] || cp "$TMPDIR_INIT/GUIDE.md" "$LIB_DIR/"
+      [ -f "$LIB_DIR/LIBRARY.md" ] || cp "$TMPDIR_INIT/LIBRARY.md" "$LIB_DIR/"
+      mkdir -p "$LIB_DIR/library"
+      [ -f "$LIB_DIR/library/_template.md" ] || cp "$TMPDIR_INIT/library/_template.md" "$LIB_DIR/library/"
+      echo "  기존 repo clone 완료"
+    else
+      # clone 실패 시 복원 후 종료
+      mv "$TMPDIR_INIT" "$LIB_DIR"
+      echo "  오류: repo clone 실패. URL을 확인하세요."
+      exit 1
+    fi
+    rm -rf "$TMPDIR_INIT"
+  else
+    # 새 repo → 현재 구조 그대로 push
+    if [ ! -d "$LIB_DIR/.git" ]; then
+      git -C "$LIB_DIR" init -q
+      git -C "$LIB_DIR" remote add origin "$repo_url"
+    fi
+    git -C "$LIB_DIR" add -A
+    git -C "$LIB_DIR" commit -q -m "feat: learnings-for-claude 초기 설정" 2>/dev/null || true
+    git -C "$LIB_DIR" push -u origin HEAD
+    echo "  새 repo 초기화 및 push 완료"
   fi
-  git -C "$LIB_DIR" add -A
-  git -C "$LIB_DIR" commit -q -m "feat: learnings-for-claude 초기 설정" 2>/dev/null || true
-  git -C "$LIB_DIR" push -u origin HEAD
-  echo "  private repo 설정 완료"
 fi
 
 # --- ~/.claude/CLAUDE.md에 규칙 추가 ---
