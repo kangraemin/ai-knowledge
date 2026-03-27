@@ -25,10 +25,29 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kangraemin/learnings-for-cla
 - 사용자가 접근법을 수정했을 때
 - 더 나은 방법을 발견했을 때
 - 링크/아티클에서 유효한 인사이트를 얻었을 때
+- 개발 중 삽질로 알게 된 API/라이브러리 동작
 
 세션 종료 / compact 시 놓친 것을 한 번 더 체크한다.
 
 **읽기** — 실험 제안 전, 막히는 상황에서 Claude가 library index를 먼저 보고 관련 항목만 읽는다.
+
+**저장 메커니즘** — SessionEnd 훅이 세션 종료 시 자동으로 실행된다:
+1. Claude가 이번 세션에서 기록할 것이 있는지 판단
+2. 있다면 `~/.claude/.claude-library/library/` 아래에 파일로 저장
+3. `LIBRARY.md` index 업데이트
+4. git repo로 관리 중이라면 자동으로 commit + push
+
+## 저장 관리 방식
+
+설치 시 아래 중 하나를 선택한다:
+
+| 방식 | 설명 |
+|------|------|
+| **로컬 파일만** | git 없이 `~/.claude/.claude-library/`에만 저장 |
+| **~/.claude repo에 포함** | 기존 ~/.claude git repo에 함께 추적 |
+| **별도 private repo** | `.claude-library/` 전용 repo로 분리 관리. 기존 repo clone 또는 새로 생성 선택 가능 |
+
+별도 repo로 관리하면 여러 기기에서 library를 공유할 수 있다.
 
 ## 구조
 
