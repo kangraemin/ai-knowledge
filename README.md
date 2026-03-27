@@ -1,75 +1,136 @@
+<div align="center">
+
 # learnings-for-claude
 
-Claude한테 장기 기억을 붙여주는 시스템.
+**Claude forgets everything when the session ends. This doesn't.**
 
-Claude는 세션이 끊기면 기억을 잃는다. 이걸 설치하면 실험 결론, 수정받은 것, 발견한 원칙이 `~/.claude/.claude-library/`에 쌓이고, 다음 세션에서 Claude가 같은 걸 또 제안하지 않는다.
+A file-based knowledge library that Claude reads and writes on its own —
+so you never have to re-explain the same thing twice.
 
-## 설치
+[Install](#install) · [How It Works](#how-it-works) · [Storage Options](#storage-options) · [Structure](#structure)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+**English** | [한국어](README.ko.md)
+
+</div>
+
+---
+
+## The Problem
+
+Working with Claude across sessions, this happens:
+
+- You run an experiment. Claude helps you figure out it doesn't work.
+- Next session: Claude suggests the exact same experiment again.
+- You run it again. It fails again.
+
+The results live in your files. The *lesson* lives nowhere.
+
+This system keeps the lesson.
+
+---
+
+## How It Works
+
+**Writing** — Claude logs automatically in these situations:
+
+- Experiment or backtest reaches a conclusion
+- You correct Claude's approach
+- A better method is found
+- Useful insight from an article or doc
+- An API gotcha discovered through a bug or error
+
+At session end, a `SessionEnd` hook fires and Claude checks if anything is worth keeping. If yes, it writes a file and commits.
+
+**Reading** — Before suggesting an approach or when stuck, Claude reads `LIBRARY.md` index and pulls relevant entries.
+
+**The flow:**
+
+```
+Session ends
+    → SessionEnd hook fires
+    → Claude judges: anything worth logging?
+    → If yes: writes file under library/[category]/[topic]/
+    → Updates LIBRARY.md index
+    → git commit + push (if repo-managed)
+```
+
+---
+
+## Install
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/kangraemin/learnings-for-claude/main/install.sh)
 ```
 
-설치 중 `.claude-library/`를 어떻게 git으로 관리할지 물어본다.
+During install, you'll choose how to manage `.claude-library/` with git (see [Storage Options](#storage-options)).
 
-## 제거
+## Uninstall
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/kangraemin/learnings-for-claude/main/uninstall.sh)
 ```
 
-## 어떻게 작동하나
+---
 
-**쓰기** — 아래 상황에서 Claude가 조용히 library에 기록한다:
-- 실험/백테스트 결론이 났을 때
-- 사용자가 접근법을 수정했을 때
-- 더 나은 방법을 발견했을 때
-- 링크/아티클에서 유효한 인사이트를 얻었을 때
-- 개발 중 삽질로 알게 된 API/라이브러리 동작
+## Storage Options
 
-세션 종료 / compact 시 놓친 것을 한 번 더 체크한다.
+Choose during install:
 
-**읽기** — 실험 제안 전, 막히는 상황에서 Claude가 library index를 먼저 보고 관련 항목만 읽는다.
+| Option | Description |
+|--------|-------------|
+| **Local only** | No git. Files stay in `~/.claude/.claude-library/` |
+| **Include in ~/.claude repo** | Tracked inside your existing `~/.claude` git repo |
+| **Separate private repo** | Dedicated repo for the library. Clone an existing one or push fresh. Syncs across machines. |
 
-**저장 메커니즘** — SessionEnd 훅이 세션 종료 시 자동으로 실행된다:
-1. Claude가 이번 세션에서 기록할 것이 있는지 판단
-2. 있다면 `~/.claude/.claude-library/library/` 아래에 파일로 저장
-3. `LIBRARY.md` index 업데이트
-4. git repo로 관리 중이라면 자동으로 commit + push
+---
 
-## 저장 관리 방식
-
-설치 시 아래 중 하나를 선택한다:
-
-| 방식 | 설명 |
-|------|------|
-| **로컬 파일만** | git 없이 `~/.claude/.claude-library/`에만 저장 |
-| **~/.claude repo에 포함** | 기존 ~/.claude git repo에 함께 추적 |
-| **별도 private repo** | `.claude-library/` 전용 repo로 분리 관리. 기존 repo clone 또는 새로 생성 선택 가능 |
-
-별도 repo로 관리하면 여러 기기에서 library를 공유할 수 있다.
-
-## 구조
+## Structure
 
 ```
 ~/.claude/
   .claude-library/
-    LIBRARY.md       ← index
-    GUIDE.md         ← 작성 가이드
+    LIBRARY.md        ← index of everything
+    GUIDE.md          ← writing guide for Claude
     library/
-      _template.md
-      2026-03-07-피보나치-안됨.md
-      2026-03-20-gld-방어-유효.md
+      equity/         ← US stocks, ETF strategies
+      crypto/         ← BTC, ETH, etc.
+      ml/             ← models, features
+      macro/          ← macro factors
+      claude/         ← Claude behavior patterns
       ...
 ```
 
-모든 프로젝트의 학습이 한 곳에 쌓인다.
+All learnings from every project accumulate in one place.
 
-## 왜 만들었나
+Each entry:
 
-Claude와 반복 작업하다 보면 이런 일이 생긴다:
-- 저번 세션에서 피보나치 전략이 안 된다는 걸 확인했는데
-- 새 세션을 열면 Claude가 또 "피보나치 어떨까요?" 를 제안한다
-- 또 돌려보고, 또 실패하고, 또 폐기한다
+```markdown
+# [Title]
 
-실험 결과(`what happened`)는 어딘가에 쌓이지만, 거기서 배운 원칙(`what we learned`)은 남지 않는다. 이 시스템은 원칙을 남긴다.
+- Date: YYYY-MM-DD
+- Source: [experiment / link / experience]
+
+## Content
+What happened. Data, numbers, context.
+
+## Takeaway
+What this means going forward.
+```
+
+---
+
+## Why
+
+Claude is a great thinking partner. But every session starts from zero.
+
+You end up carrying the institutional memory yourself — re-explaining past failures, re-establishing context, re-correcting the same mistakes. That overhead compounds.
+
+This shifts the memory to where it belongs: the system, not you.
+
+---
+
+## License
+
+MIT
