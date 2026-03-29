@@ -56,6 +56,24 @@ copy_if_changed "$PACKAGE_DIR/hooks/library-sync.sh" "$HOOK_DIR/library-sync.sh"
 copy_if_changed "$PACKAGE_DIR/scripts/update-check.sh" "$HOOK_DIR/learnings-update-check.sh" "learnings-update-check.sh (script)"
 copy_if_changed "$PACKAGE_DIR/GUIDE.md" "$LIB_DIR/GUIDE.md" "GUIDE.md"
 
+# ~/.claude/CLAUDE.md Library 섹션 업데이트
+GLOBAL_CLAUDE="$HOME/.claude/CLAUDE.md"
+RULES_SRC="$PACKAGE_DIR/templates/claude-rules.md"
+if [ -f "$GLOBAL_CLAUDE" ] && [ -f "$RULES_SRC" ]; then
+  python3 - "$GLOBAL_CLAUDE" "$RULES_SRC" << 'PYEOF'
+import sys, re
+target, src = sys.argv[1], sys.argv[2]
+content = open(target).read()
+new_rules = "\n" + open(src).read()
+updated = re.sub(r'\n## Library 시스템.*', new_rules, content, flags=re.DOTALL)
+if updated != content:
+    open(target, 'w').write(updated)
+    print("  CLAUDE.md Library 섹션 업데이트")
+else:
+    print("·  CLAUDE.md 변경 없음")
+PYEOF
+fi
+
 # 버전 기록
 LATEST_SHA=$(git -C "$PACKAGE_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 echo "$LATEST_SHA" > "$HOOK_DIR/.learnings-version"
