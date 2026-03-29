@@ -494,13 +494,12 @@ for event in ['SessionEnd', 'PostCompact', 'Stop', 'SessionStart']:
   [ -z "$out" ]
 }
 
-@test "TC-60: save-check returns block decision on 10th call (counter wraps to 0)" {
+@test "TC-60: save-check returns block decision on first call of new session" {
   install_with_input "1" > /dev/null 2>&1 || true
   local hook="$CLAUDE_DIR/hooks/library-save-check.sh"
   [ -f "$hook" ] || skip "hook not installed"
-  # counter=9 → next call: (9+1)%10=0 → triggers block
-  echo "9" > "$CLAUDE_DIR/hooks/.library-check-counter-sess_tenth"
-  local input='{"stop_hook_active": false, "session_id": "sess_tenth"}'
+  # counter 파일 없는 새 세션 → 첫 호출에서 block
+  local input='{"stop_hook_active": false, "session_id": "new_session_xyz"}'
   local out
   out=$(echo "$input" | bash "$hook" 2>/dev/null)
   echo "$out" | python3 -c "import json,sys; d=json.load(sys.stdin); assert d['decision']=='block', d"
