@@ -3,9 +3,9 @@
 참조: `~/.claude/.claude-library/GUIDE.md`
 
 ### 읽기
-- 새 실험/전략 제안 전, 막히는 상황에서 `~/.claude/.claude-library/LIBRARY.md`를 읽는다
-- 관련 카테고리/주제 폴더의 `index.md`를 찾아 읽는다
-- 참조한 항목이 있으면 한 줄로 알린다: `📚 library 참조: [경로]`
+- **`library_search(query)` MCP tool을 사용한다** — 파일 직접 읽기 금지
+- 새 실험/전략 제안 전, 막히는 상황에서 관련 키워드로 검색한다
+- 참조한 항목이 있으면 한 줄로 알린다: `📚 library 참조: [topic]`
 - 이미 기록된 방향은 재제안하지 않는다
 
 ### 쓰기
