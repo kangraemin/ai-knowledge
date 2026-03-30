@@ -63,6 +63,8 @@ library/
 ```markdown
 # [주제명]
 
+관련: category/topic-a, category/topic-b
+
 ## 요약
 현재까지 알고 있는 것. 핵심 내용.
 
@@ -70,6 +72,11 @@ library/
 - [backtest.md](backtest.md) — 한 줄 설명
 - [article.md](article.md) — 한 줄 설명
 ```
+
+### `관련:` 태그
+- 이 주제와 관련된 다른 주제를 `카테고리/주제` 형식으로 나열
+- 관련 주제가 없으면 생략
+- 양방향으로 추가 (A에 B를 넣으면 B에도 A를 넣는다)
 
 ---
 

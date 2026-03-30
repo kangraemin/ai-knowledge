@@ -2,8 +2,12 @@
 
 참조: `~/.claude/.claude-library/GUIDE.md`
 
+### 목차
+> 설치 후 library에 지식이 쌓이면 여기에 카테고리별 주제 목록이 자동 추가됩니다.
+
 ### 읽기
-- **`library_search(query)` MCP tool을 사용한다** — 파일 직접 읽기 금지
+- 목차를 보고 관련 주제를 직접 판단한 뒤 `library_read(path)`로 읽는다
+- 키워드 매칭이 필요하면 `library_search(query)`도 보조로 사용
 - 새 실험/전략 제안 전, 막히는 상황에서 관련 키워드로 검색한다
 - 참조한 항목이 있으면 한 줄로 알린다: `📚 library 참조: [topic]`
 - 이미 기록된 방향은 재제안하지 않는다
@@ -28,14 +32,15 @@
 1. 카테고리 판단 — 개념/도메인 기준 (위 원칙 참고, equity/crypto/ml/macro/claude 등)
 2. 주제 폴더 확인/생성: `~/.claude/.claude-library/library/[카테고리]/[주제]/`
 3. 지식 파일 생성: 내용을 설명하는 이름 (날짜 없음)
-4. 주제 `index.md` 생성/업데이트
+4. 주제 `index.md` 생성/업데이트 + `관련:` 태그 추가 (관련 주제가 있으면)
 5. `~/.claude/.claude-library/LIBRARY.md` 업데이트
-6. 즉시 commit/push:
+6. CLAUDE.md 목차 업데이트
+7. 즉시 commit/push:
    ```
    git -C ~/.claude/.claude-library add -A
    git -C ~/.claude/.claude-library commit -m "feat: [주제] 추가"
    git -C ~/.claude/.claude-library push
    ```
-7. 한 줄로 알린다: `📚 library에 추가: [경로]`
+8. 한 줄로 알린다: `📚 library에 추가: [경로]`
 
 미결 상태는 기록하지 않는다.
