@@ -22,14 +22,18 @@
 - **틀린 내용을 교정받았을 때** — "그게 아니야"라고 교정받으면 그 자리에서 바로 저장. "저장할까요?" 묻지 않는다.
 
 ### 카테고리 분류 원칙
-**도구명/프로젝트명이 아니라 개념/도메인 기준으로 분류한다.**
-- Claude Code hook/이벤트 → `claude/claude-code`
-- AI 개념 → `ai/`
-- 특정 API 동작 → 해당 서비스명 (예: `tools/notion`)
-- ❌ 금지: `claude/worklog`, `claude/설치스크립트` 같은 도구명 카테고리
+**지식의 도메인 기준으로 분류한다. 도구명/플랫폼명 카테고리 금지.**
+- 주식/ETF 전략 → `finance/equity`
+- 코인 전략 → `finance/crypto`
+- 머신러닝/대회 → `ml`
+- 개발 도구 동작 → `dev/tooling`
+- CI/CD, 환경 → `dev/infra`
+- 외부 API 동작 → `dev/api`
+- 테스팅 패턴 → `dev/testing`
+- ❌ 금지: `kaggle/`, `spring/`, `claude/` 같은 도구명/플랫폼명 카테고리
 
 기록 방법:
-1. 카테고리 판단 — 개념/도메인 기준 (위 원칙 참고, equity/crypto/ml/macro/claude 등)
+1. 카테고리 판단 — 목차에서 가장 가까운 카테고리 선택, 없으면 새로 생성
 2. 주제 폴더 확인/생성: `~/.claude/.claude-library/library/[카테고리]/[주제]/`
 3. 지식 파일 생성: 내용을 설명하는 이름 (날짜 없음)
 4. 주제 `index.md` 생성/업데이트 + `관련:` 태그 추가 (관련 주제가 있으면)
