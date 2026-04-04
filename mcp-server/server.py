@@ -13,7 +13,8 @@ LIBRARY_ROOT = Path(os.environ.get("LIBRARY_ROOT", Path.home() / ".claude" / ".c
 mcp = FastMCP(
     "claude-library",
     instructions=(
-        "기술적 질문에 답하거나 뭔가 제안하기 전에 library_search()를 무조건 호출해라. "
+        "도구, 프로젝트, 기술 키워드가 언급되거나 기술적 질문에 답하거나 뭔가 제안하기 전에 library_search()를 무조건 호출해라. "
+        "'찾아봐', '검색해봐' 같은 탐색 요청도 파일시스템 뒤지기 전에 library부터 확인해라. "
         "결과가 없어도 호출은 해야 한다. "
         "이미 시도했거나 실패한 접근법, 삽질로 알게 된 사실, 교정받은 내용이 있을 수 있다. "
         "검색 결과가 있으면 '📚 library 참조: [topic]' 한 줄로 알리고 이미 기록된 방향은 재제안하지 마라. "
@@ -39,18 +40,40 @@ def _search_index(query: str) -> list[dict]:
     query_lower = query.lower()
     results = []
 
+    # 현재 카테고리/서브카테고리 헤더 추적
+    current_category = ""
+    current_sub = ""
+
     for line in content.splitlines():
+        # 카테고리/서브카테고리 헤더 추적
+        if line.startswith("## ") and not line.startswith("### "):
+            current_category = line[3:].strip()
+            current_sub = ""
+            continue
+        if line.startswith("### "):
+            current_sub = line[4:].strip()
+            continue
+
         # - [topic](path) — description 형식
         match = re.match(r"-\s+\[([^\]]+)\]\(([^)]+)\)\s+—\s+(.*)", line)
-        if not match:
-            continue
-        topic, rel_path, description = match.groups()
-        # 쿼리가 topic 또는 description에 포함되면 매칭
-        if any(q in topic.lower() or q in description.lower() for q in query_lower.split()):
+        if match:
+            topic, rel_path, description = match.groups()
+        else:
+            # - [topic](path) (N) 형식 (description 없음)
+            match = re.match(r"-\s+\[([^\]]+)\]\(([^)]+)\)", line)
+            if not match:
+                continue
+            topic, rel_path = match.groups()
+            description = ""
+
+        # 검색 대상: topic, description, category, subcategory, path
+        searchable = f"{topic} {description} {current_category} {current_sub} {rel_path}".lower()
+        if any(q in searchable for q in query_lower.split()):
+            label = "/".join(filter(None, [current_category, current_sub, topic]))
             results.append({
-                "topic": topic,
+                "topic": label,
                 "path": rel_path,
-                "description": description,
+                "description": description or f"{current_category}/{current_sub}",
             })
 
     return results

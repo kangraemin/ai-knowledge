@@ -2,46 +2,60 @@
 
 ## 구조
 
-도서관처럼 카테고리 → 주제 → 지식 파일 계층으로 구성한다.
+카테고리 → 서브카테고리 → 주제 → 지식 파일 계층으로 구성한다.
+분류 체계는 `TAXONOMY.md`를 따른다.
 
 ```
 library/
-  equity/                       ← 카테고리 (미국 주식/ETF 전략)
-    fibonacci-retracement/      ← 주제
-      index.md                  ← 주제 요약 + 하위 파일 목록
-      backtest.md               ← 지식 파일
-      article.md
-    indicator-timing/
+  dev/                          ← 카테고리
+    tooling/                    ← 서브카테고리
+      claude-code/              ← 주제
+        index.md                ← 주제 요약 + 하위 파일 목록
+        hook-input-stdin.md     ← 지식 파일
+        stop-hook-timing.md
+      mcp-patterns/
+        index.md
+    testing/
+      spring-isolation/
+        index.md
+  finance/
+    crypto/                     ← 서브카테고리 (자산군)
+      bb-rsi-longshort/         ← 주제 (전략명)
+        index.md
+    equity/
+      cross-momentum/
+        index.md
+  ml/
+    classification/             ← 서브카테고리 (기법)
       index.md
-  crypto/                       ← 카테고리 (코인 전략)
-    bb-rsi-longshort/
-      index.md
-  ml/                           ← 카테고리 (머신러닝 모델)
-    lgbm/
-      index.md
-  macro/                        ← 카테고리 (거시경제)
-  claude/                       ← 카테고리 (Claude 행동 패턴)
-    prompt-patterns/
+    time-series/
       index.md
 ```
 
-### 카테고리 예시
-- `equity` — 미국 주식/ETF 전략, 레버리지 ETF
-- `crypto` — 코인 전략 (BTC/ETH/XRP 등)
-- `ml` — 머신러닝/모델
-- `macro` — 거시경제
-- `claude` — Claude 행동 패턴, 프롬프트
-- 필요하면 새 카테고리 추가
+### 분류 원칙
+
+**TAXONOMY.md를 먼저 확인한다.** 매칭되는 카테고리/서브카테고리가 없으면 TAXONOMY.md에 먼저 추가 후 저장.
+
+- ❌ 대회명: `kaggle-ts-forecasting/`, `birdclef/`
+- ❌ 프로젝트명: `churn-prediction/`, `stock-bot/`
+- ❌ 도구명을 카테고리로: `lgbm/`, `claude/`
+- ✅ 기법/주제 기준: `time-series/`, `classification/`, `gradient-boosting/`
+- ✅ 도메인 기준: `crypto/`, `equity/`, `testing/`
+
+### 파일명 원칙
+
+파일명은 **"뭘 배웠는지"**를 드러내야 한다.
+
+- ❌ `discovery.md`, `backtest.md` (무슨 내용인지 알 수 없음)
+- ❌ `churn-lessons.md` (프로젝트명)
+- ✅ `ar1-lag-is-dominant-signal.md` (교훈이 드러남)
+- ✅ `synthetic-data-distribution-overfit.md` (무슨 일이 있었는지 알 수 있음)
+
+단, finance/ 하위 전략별 `backtest.md`는 폴더가 전략명이므로 OK.
 
 ### 주제 폴더
-- 구체적인 개념 하나 = 폴더 하나
-- 영어, 소문자, hyphen 구분 (`fibonacci-retracement`, `gld-defense`)
+- 영어, 소문자, hyphen 구분
 - 날짜 붙이지 않는다
-
-### 지식 파일
-- 내용을 설명하는 이름 (`backtest.md`, `paper.md`, `discovery.md`)
-- 날짜 붙이지 않는다
-- 같은 주제에 지식이 쌓이면 파일 추가
 
 ---
 
@@ -63,18 +77,17 @@ library/
 ```markdown
 # [주제명]
 
-관련: category/topic-a, category/topic-b
+관련: category/subcategory/topic-a, category/subcategory/topic-b
 
 ## 요약
 현재까지 알고 있는 것. 핵심 내용.
 
 ## 지식 목록
-- [backtest.md](backtest.md) — 한 줄 설명
-- [article.md](article.md) — 한 줄 설명
+- [file.md](file.md) — 한 줄 설명
 ```
 
 ### `관련:` 태그
-- 이 주제와 관련된 다른 주제를 `카테고리/주제` 형식으로 나열
+- 이 주제와 관련된 다른 주제를 `카테고리/서브카테고리/주제` 형식으로 나열
 - 관련 주제가 없으면 생략
 - 양방향으로 추가 (A에 B를 넣으면 B에도 A를 넣는다)
 
@@ -99,18 +112,17 @@ library/
 
 ## LIBRARY.md 업데이트
 
-카테고리별로 주제 index.md를 링크한다.
+카테고리 → 서브카테고리 → 주제 계층으로 링크한다.
 
 ```markdown
-## equity
-- [fibonacci-retracement](library/equity/fibonacci-retracement/index.md) — 한 줄 요약
-- [indicator-timing](library/equity/indicator-timing/index.md) — 한 줄 요약
-
-## crypto
-- [bb-rsi-longshort](library/crypto/bb-rsi-longshort/index.md) — 한 줄 요약
+## dev
+### tooling
+- [claude-code](library/dev/tooling/claude-code/index.md) (5)
+- [mcp-patterns](library/dev/tooling/mcp-patterns/index.md) (1)
 
 ## ml
-- [lgbm](library/ml/lgbm/index.md) — 한 줄 요약
+- [classification](library/ml/classification/index.md) (3)
+- [time-series](library/ml/time-series/index.md) (4)
 ```
 
 ---
@@ -120,3 +132,4 @@ library/
 - 미결이라도 기록할 가치가 있으면 기록한다 (억지로 결론 내리지 않는다)
 - 파일명에 날짜 붙이지 않는다
 - 오타/포맷 수정은 기록하지 않는다
+- TAXONOMY.md에 없는 카테고리를 임의로 만들지 않는다 (먼저 추가 후 저장)
