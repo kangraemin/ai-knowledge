@@ -9,15 +9,15 @@ INPUT=$(cat)
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
 [ "$STOP_HOOK_ACTIVE" = "true" ] && exit 0
 
-# 10번에 1번만 실행 (세션별 독립)
+# 20번에 1번만 실행 (세션별 독립)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
 COUNTER_FILE="$HOME/.claude/hooks/.library-check-counter-$SESSION_ID"
 COUNT=0
 [ -f "$COUNTER_FILE" ] && COUNT=$(cat "$COUNTER_FILE")
 COUNT=$((COUNT + 1))
 echo "$COUNT" > "$COUNTER_FILE"
-# 10의 배수일 때만 block (첫 호출은 skip)
-[ $((COUNT % 10)) -ne 0 ] && exit 0
+# 20의 배수일 때만 block (첫 호출은 skip)
+[ $((COUNT % 20)) -ne 0 ] && exit 0
 
 jq -n '{
   "decision": "block",
