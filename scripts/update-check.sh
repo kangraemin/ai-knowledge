@@ -22,6 +22,42 @@ for arg in "$@"; do
   esac
 done
 
+# ── 누락 hook 검증 (매 세션) ──────────────────────────────────────────────────
+PYTHON=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo python3)
+
+_ensure_hook() {
+  local sf="$1" event="$2" cmd="$3" timeout="$4" is_async="$5" matcher="${6:-}"
+  [ -f "$sf" ] || return 0
+  [ -f "$cmd" ] || return 0
+  local bn
+  bn=$(basename "$cmd")
+  grep -q "$bn" "$sf" 2>/dev/null && return 0
+  $PYTHON -c "
+import json, sys
+sf, event, cmd = sys.argv[1], sys.argv[2], sys.argv[3]
+timeout, is_async, matcher = int(sys.argv[4]), sys.argv[5] == 'true', sys.argv[6]
+cfg = json.load(open(sf))
+hooks = cfg.setdefault('hooks', {})
+entries = hooks.setdefault(event, [])
+hook = {'type': 'command', 'command': cmd, 'timeout': timeout}
+if is_async:
+    hook['async'] = True
+entry = {'hooks': [hook]}
+if matcher:
+    entry['matcher'] = matcher
+entries.append(entry)
+with open(sf, 'w') as f:
+    json.dump(cfg, f, indent=2, ensure_ascii=False)
+    f.write('\n')
+print('added')
+" "$sf" "$event" "$cmd" "$timeout" "$is_async" "$matcher" >/dev/null 2>&1
+  echo "✓  ${event} hook 등록: $bn" >&2
+}
+
+SETTINGS="$HOME/.claude/settings.json"
+_ensure_hook "$SETTINGS" "SessionStart" "$HOOK_DIR/learnings-update-check.sh" 15 true  "" || true
+_ensure_hook "$SETTINGS" "Stop"         "$HOOK_DIR/library-save-check.sh"     10 false "" || true
+
 # 설치 확인
 [ -f "$HOOK_DIR/library-sync.sh" ] || exit 0
 
