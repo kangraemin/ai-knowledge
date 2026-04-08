@@ -34,13 +34,18 @@
 - ✅ `ar1-lag-is-dominant-signal.md`, `synthetic-data-distribution-overfit.md`
 - 예외: finance/ 하위 전략별 `backtest.md`는 폴더가 전략명이므로 OK
 
+### 지식 파일 메타데이터
+- `source_session`: 어느 세션에서 발견했는지 (워크로그 날짜/시간 또는 세션 컨텍스트). 나중에 "이거 왜 이렇게 기록했지?" 역추적용.
+
 기록 방법:
 1. **TAXONOMY.md 확인** — 매칭되는 분류 찾기, 없으면 추가
 2. 주제 폴더 확인/생성: `~/.claude/.claude-library/library/[카테고리]/[서브카테고리]/[주제]/`
-3. 지식 파일 생성: 교훈이 드러나는 이름 (날짜 없음)
+3. 지식 파일 생성: 교훈이 드러나는 이름 (날짜 없음), `source_session` 포함
 4. 주제 `index.md` 생성/업데이트 + `관련:` 태그 추가 (관련 주제가 있으면)
+4.5. **관련 주제 자동 탐색**: `library_search()`로 새 파일의 핵심 키워드 검색 → 관련 주제 발견 시 양방향 `관련:` 태그 추가 (새 index.md + 기존 index.md 모두)
 5. `~/.claude/.claude-library/LIBRARY.md` 업데이트
 6. CLAUDE.md 목차 업데이트
+6.5. **Synthesis 체크**: 같은 서브카테고리에 파일 3개 이상이면 "종합 문서 필요한가?" 자문 → 공통 패턴이 보이면 `library/synthesis/`에 작성
 7. 즉시 commit/push:
    ```
    git -C ~/.claude/.claude-library add -A
