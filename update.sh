@@ -93,6 +93,23 @@ else:
 PYEOF
 fi
 
+# --- permissions: library 경로 허용 (누락 시 보충) ---
+SETTINGS="$HOME/.claude/settings.json"
+if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
+  if jq -e '.permissions.allow // [] | map(select(test("claude-library"))) | length > 0' "$SETTINGS" >/dev/null 2>&1; then
+    skip "library 경로 권한 이미 존재"
+  else
+    jq '
+      .permissions.allow = ((.permissions.allow // []) + [
+        "Write(~/.claude/.claude-library/**)",
+        "Edit(~/.claude/.claude-library/**)"
+      ] | unique)
+    ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+    ok "library 경로 Write/Edit 권한 추가"
+    UPDATED=$((UPDATED + 1))
+  fi
+fi
+
 # 버전 기록
 LATEST_SHA=$(git -C "$PACKAGE_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 echo "$LATEST_SHA" > "$HOOK_DIR/.learnings-version"
