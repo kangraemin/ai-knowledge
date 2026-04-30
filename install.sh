@@ -229,14 +229,37 @@ _inject_rules() {
 import sys, re
 target, src = sys.argv[1], sys.argv[2]
 content = open(target).read()
-new_rules = "\n" + open(src).read()
-updated = re.sub(r'\n## Library 시스템.*', new_rules, content, flags=re.DOTALL)
-open(target, 'w').write(updated)
+new_block = open(src).read()
+
+START = '## Library 시스템'
+start_idx = content.find('\n' + START)
+if start_idx != -1:
+    rest = content[start_idx + 1:]
+    # 다음 섹션(## 또는 # ---) 직전까지만 교체
+    end_match = re.search(r'\n(##? |# ---)', rest)
+    if end_match:
+        end_idx = start_idx + 1 + end_match.start()
+        content = content[:start_idx + 1] + new_block + '\n\n' + content[end_idx:]
+    else:
+        content = content[:start_idx + 1] + new_block + '\n'
+open(target, 'w').write(content)
 PYEOF
     echo "  $(msg '~/.claude/CLAUDE.md 규칙 업데이트' '~/.claude/CLAUDE.md rules updated')"
   else
-    printf "\n" >> "$target"
-    cat "$RULES_SRC" >> "$target"
+    python3 - "$target" "$RULES_SRC" << 'PYEOF'
+import sys, re
+target, src = sys.argv[1], sys.argv[2]
+content = open(target).read()
+new_block = open(src).read()
+
+# ai-bouncer 섹션 앞에 삽입, 없으면 파일 끝에 추가
+bouncer_idx = content.find('\n# ---')
+if bouncer_idx != -1:
+    content = content[:bouncer_idx + 1] + new_block + '\n\n' + content[bouncer_idx + 1:]
+else:
+    content = content.rstrip('\n') + '\n\n' + new_block + '\n'
+open(target, 'w').write(content)
+PYEOF
     echo "  $(msg '~/.claude/CLAUDE.md 규칙 추가' '~/.claude/CLAUDE.md rules added')"
   fi
 }
