@@ -4,9 +4,7 @@
       "mcp__claude-library__library_search",
       "mcp__claude-library__library_list",
       "mcp__claude-library__library_read",
-      "Skill(update-config)",
-      "Bash(rm -f ~/.claude/hooks/.learnings-version-checked)",
-      "Bash(bash ~/.claude/hooks/learnings-update-check.sh --check-only)"
+      "Skill(update-config)"
     ]
   }
 }
