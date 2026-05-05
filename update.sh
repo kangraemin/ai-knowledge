@@ -116,6 +116,21 @@ if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
   fi
 fi
 
+# --- PreToolUse 훅: library-allow 등록 (누락 시 보충) ---
+if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
+  if grep -qF "library-allow" "$SETTINGS" 2>/dev/null; then
+    skip "library-allow 훅 이미 등록됨"
+  else
+    LIBRARY_ALLOW_DEST="$HOME/.claude/hooks/library-allow.sh"
+    LIBRARY_ALLOW_JSON="{\"matcher\":\"Write|Edit|MultiEdit\",\"hooks\":[{\"type\":\"command\",\"command\":\"$LIBRARY_ALLOW_DEST\",\"timeout\":3}]}"
+    jq --argjson hook "$LIBRARY_ALLOW_JSON" '
+      .hooks.PreToolUse = (.hooks.PreToolUse // []) + [$hook]
+    ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+    ok "library-allow.sh PreToolUse 훅 등록"
+    UPDATED=$((UPDATED + 1))
+  fi
+fi
+
 # 버전 기록
 LATEST_SHA=$(git -C "$PACKAGE_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
 echo "$LATEST_SHA" > "$HOOK_DIR/.learnings-version"
