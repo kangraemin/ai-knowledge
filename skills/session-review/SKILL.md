@@ -34,7 +34,7 @@ description: 세션에서 배울게있는지 정리하고 library에 저장. '�
 
 ## 저장 방법
 
-Library 경로: `~/.claude/.claude-library/library/`
+Library 경로: `~/claude-library/library/`
 
 ### 분류
 **`~/.claude/TAXONOMY.md`를 먼저 확인한다.**
@@ -51,10 +51,10 @@ Library 경로: `~/.claude/.claude-library/library/`
 
 ### 파일 작성 순서
 1. TAXONOMY.md 확인 — 매칭 분류 찾기, 없으면 추가
-2. `~/.claude/.claude-library/library/[카테고리]/[서브카테고리]/[주제]/[파일명].md` 생성 (`source_session` 포함)
+2. `~/claude-library/library/[카테고리]/[서브카테고리]/[주제]/[파일명].md` 생성 (`source_session` 포함)
 3. 주제 `index.md` 생성 또는 업데이트 + `관련:` 태그
 3.5. **자동 크로스레퍼런스**: `library_search()`로 핵심 키워드 검색 → 관련 주제 발견 시 양방향 `관련:` 태그 추가
-4. `~/.claude/.claude-library/LIBRARY.md` 업데이트
+4. `~/claude-library/LIBRARY.md` 업데이트
 5. `~/.claude/CLAUDE.md` 목차에 새 주제 추가 (없으면)
 5.5. **Synthesis 체크**: 같은 서브카테고리 파일 3개 이상이면 종합 문서 필요성 자문 → 필요하면 `library/synthesis/`에 작성
 
@@ -75,9 +75,9 @@ Library 경로: `~/.claude/.claude-library/library/`
 
 ## 커밋
 ```bash
-git -C ~/.claude/.claude-library add -A
-git -C ~/.claude/.claude-library commit -m "feat: [주제] 추가"
-git -C ~/.claude/.claude-library push
+git -C ~/claude-library add -A
+git -C ~/claude-library commit -m "feat: [주제] 추가"
+git -C ~/claude-library push
 ```
 
 저장 후: `📚 library에 추가: [경로]` 한 줄로 알린다.

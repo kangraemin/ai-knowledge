@@ -115,7 +115,7 @@ The installer configures this automatically in `~/.claude/settings.json`:
       "command": "uvx",
       "args": ["claude-library-mcp"],
       "env": {
-        "LIBRARY_ROOT": "~/.claude/.claude-library"
+        "LIBRARY_ROOT": "~/claude-library"
       }
     }
   }
@@ -142,7 +142,7 @@ Choose during install:
 
 | Option | Description |
 |--------|-------------|
-| **Local only** | No git. Files stay in `~/.claude/.claude-library/` |
+| **Local only** | No git. Files stay in `~/claude-library/` |
 | **Include in ~/.claude repo** | Tracked inside your existing `~/.claude` git repo |
 | **Separate private repo** | Dedicated repo for the library. Syncs across machines. |
 
@@ -196,8 +196,7 @@ The installer creates an "AI Library" database:
 Classification follows `TAXONOMY.md` — organized by domain/technique, not by tool or project name.
 
 ```
-~/.claude/
-  .claude-library/
+~/claude-library/
     LIBRARY.md          ← searchable index
     CHANGELOG.md        ← chronological log of all changes
     GUIDE.md            ← writing guide for Claude

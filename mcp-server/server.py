@@ -1,6 +1,6 @@
 """
 Claude Library MCP Server
-~/.claude/.claude-library 에서 지식을 검색하는 MCP 서버
+~/claude-library 에서 지식을 검색하는 MCP 서버
 """
 
 import os
@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
-LIBRARY_ROOT = Path(os.environ.get("LIBRARY_ROOT", Path.home() / ".claude" / ".claude-library"))
+LIBRARY_ROOT = Path(os.environ.get("LIBRARY_ROOT", Path.home() / "claude-library"))
 
 mcp = FastMCP(
     "claude-library",

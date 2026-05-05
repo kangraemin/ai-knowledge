@@ -3,7 +3,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_DIR="$HOME/.claude"
-LIB_DIR="$CLAUDE_DIR/.claude-library"
+LIB_DIR="$HOME/claude-library"
 SETTINGS="$CLAUDE_DIR/settings.json"
 HOOK_DEST="$CLAUDE_DIR/hooks/library-sync.sh"
 
@@ -147,7 +147,7 @@ if [ ! -f "$LIB_DIR/library/_template.md" ]; then
 EOF
 fi
 
-echo "  $(msg '~/.claude/.claude-library/ 생성' '~/.claude/.claude-library/ created')"
+echo "  $(msg '~/claude-library/ 생성' '~/claude-library/ created')"
 
 # --- git 설정 ---
 NEED_GITIGNORE=false
@@ -465,7 +465,7 @@ description: 세션에서 배울게있는지 정리하고 library에 저장. '�
 
 ## 저장 방법
 
-Library 경로: `~/.claude/.claude-library/library/`
+Library 경로: `~/claude-library/library/`
 
 ### 카테고리 판단
 **도서관에서 책을 정리하듯, 지식의 주제(도메인) 기준으로 분류한다.**
@@ -473,9 +473,9 @@ Library 경로: `~/.claude/.claude-library/library/`
 - ❌ `kaggle/`, `spring/`, `claude/` 같은 도구명/플랫폼명 카테고리 금지
 
 ### 파일 작성 순서
-1. `~/.claude/.claude-library/library/[카테고리]/[주제]/[파일명].md` 생성
+1. `~/claude-library/library/[카테고리]/[주제]/[파일명].md` 생성
 2. 주제 `index.md` 생성 또는 업데이트 + `관련:` 태그 추가 (관련 주제가 있으면)
-3. `~/.claude/.claude-library/LIBRARY.md` 업데이트
+3. `~/claude-library/LIBRARY.md` 업데이트
 4. `~/.claude/CLAUDE.md` 목차에 새 주제 추가 (없으면)
 
 ### 지식 파일 형식
@@ -494,9 +494,9 @@ Library 경로: `~/.claude/.claude-library/library/`
 
 ## 커밋
 ```bash
-git -C ~/.claude/.claude-library add -A
-git -C ~/.claude/.claude-library commit -m "feat: [주제] 추가"
-git -C ~/.claude/.claude-library push
+git -C ~/claude-library add -A
+git -C ~/claude-library commit -m "feat: [주제] 추가"
+git -C ~/claude-library push
 ```
 
 저장 후: `📚 library에 추가: [경로]` 한 줄로 알린다.
@@ -568,7 +568,7 @@ if command -v jq >/dev/null 2>&1; then
   jq '.mcpServers["claude-library"] = {
     "command": "uvx",
     "args": ["claude-library-mcp"],
-    "env": {"LIBRARY_ROOT": ($home + "/.claude/.claude-library")}
+    "env": {"LIBRARY_ROOT": ($home + "/claude-library")}
   }' --arg home "$HOME" "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
   echo "  $(msg 'MCP 서버 등록: claude-library-mcp (uvx)' 'MCP server registered: claude-library-mcp (uvx)')"
 fi
@@ -580,13 +580,13 @@ if command -v jq >/dev/null 2>&1; then
   else
     jq --arg home "$HOME" '
       .permissions.allow = ((.permissions.allow // []) + [
-        "Write(~/.claude/.claude-library/**)",
-        "Edit(~/.claude/.claude-library/**)",
-        ("Write(" + $home + "/.claude/.claude-library/**)"),
-        ("Edit(" + $home + "/.claude/.claude-library/**)")
+        "Write(~/claude-library/**)",
+        "Edit(~/claude-library/**)",
+        ("Write(" + $home + "/claude-library/**)"),
+        ("Edit(" + $home + "/claude-library/**)")
       ] | unique) |
       .permissions.additionalDirectories = ((.permissions.additionalDirectories // []) + [
-        ($home + "/.claude/.claude-library")
+        ($home + "/claude-library")
       ] | unique)
     ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
     echo "  $(msg 'library 경로 Write/Edit 권한 등록 (절대경로 + additionalDirectories 포함)' 'Library path Write/Edit permissions registered (with absolute path + additionalDirectories)')"
@@ -757,5 +757,5 @@ fi
 
 echo ""
 echo "$(msg '완료.' 'Done.')"
-echo "  library: ~/.claude/.claude-library/library/"
-echo "  index:   ~/.claude/.claude-library/LIBRARY.md"
+echo "  library: ~/claude-library/library/"
+echo "  index:   ~/claude-library/LIBRARY.md"

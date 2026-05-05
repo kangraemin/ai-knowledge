@@ -50,7 +50,7 @@ HOOK_DIR="$HOME/.claude/hooks"
 
 [ -f "$HOOK_DIR/library-sync.sh" ] || { echo "  install.sh를 먼저 실행하세요."; exit 1; }
 
-LIB_DIR="$HOME/.claude/.claude-library"
+LIB_DIR="$HOME/claude-library"
 
 copy_if_changed "$PACKAGE_DIR/hooks/library-sync.sh" "$HOOK_DIR/library-sync.sh" "library-sync.sh (hook)"
 copy_if_changed "$PACKAGE_DIR/hooks/library-save-check.sh" "$HOOK_DIR/library-save-check.sh" "library-save-check.sh (stop hook)"
@@ -102,13 +102,13 @@ if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
   else
     jq --arg home "$HOME" '
       .permissions.allow = ((.permissions.allow // []) + [
-        "Write(~/.claude/.claude-library/**)",
-        "Edit(~/.claude/.claude-library/**)",
-        ("Write(" + $home + "/.claude/.claude-library/**)"),
-        ("Edit(" + $home + "/.claude/.claude-library/**)")
+        "Write(~/claude-library/**)",
+        "Edit(~/claude-library/**)",
+        ("Write(" + $home + "/claude-library/**)"),
+        ("Edit(" + $home + "/claude-library/**)")
       ] | unique) |
       .permissions.additionalDirectories = ((.permissions.additionalDirectories // []) + [
-        ($home + "/.claude/.claude-library")
+        ($home + "/claude-library")
       ] | unique)
     ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
     ok "library 경로 Write/Edit 권한 추가 (절대경로 + additionalDirectories 포함)"

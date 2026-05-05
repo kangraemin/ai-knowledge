@@ -115,7 +115,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kangraemin/learnings-for-cla
       "command": "uvx",
       "args": ["claude-library-mcp"],
       "env": {
-        "LIBRARY_ROOT": "~/.claude/.claude-library"
+        "LIBRARY_ROOT": "~/claude-library"
       }
     }
   }
@@ -142,7 +142,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kangraemin/learnings-for-cla
 
 | 방식 | 설명 |
 |------|------|
-| **로컬 파일만** | git 없이 `~/.claude/.claude-library/`에만 저장 |
+| **로컬 파일만** | git 없이 `~/claude-library/`에만 저장 |
 | **~/.claude repo에 포함** | 기존 `~/.claude` git repo 안에서 함께 추적 |
 | **별도 private repo** | library 전용 repo로 분리 관리. 여러 기기 간 동기화 가능. |
 
@@ -196,8 +196,7 @@ Yes 선택 시 필요한 것:
 분류는 `TAXONOMY.md`를 따릅니다 — 도구명이나 프로젝트명이 아닌 도메인/기법 기준으로 분류합니다.
 
 ```
-~/.claude/
-  .claude-library/
+~/claude-library/
     LIBRARY.md          ← 검색 가능한 인덱스
     CHANGELOG.md        ← 모든 변경의 시간순 기록
     GUIDE.md            ← Claude용 작성 가이드
