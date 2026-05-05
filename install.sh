@@ -306,6 +306,25 @@ else
   echo "  $(msg 'Stop 훅 등록: library-save-check.sh' 'Stop hook registered: library-save-check.sh')"
 fi
 
+# --- PreToolUse 훅: library-allow (permission dialog 우회) ---
+LIBRARY_ALLOW_DEST="$CLAUDE_DIR/hooks/library-allow.sh"
+
+if grep -qF "library-allow" "$SETTINGS" 2>/dev/null; then
+  echo "  $(msg 'library-allow 훅 이미 존재 — 스킵' 'library-allow hook already exists — skipped')"
+elif ! command -v jq >/dev/null 2>&1; then
+  echo "  $(msg '경고: jq 없음 — library-allow 훅 스킵' 'Warning: jq not found — library-allow hook skipped')"
+else
+  cp "$SCRIPT_DIR/hooks/library-allow.sh" "$LIBRARY_ALLOW_DEST"
+  chmod +x "$LIBRARY_ALLOW_DEST"
+
+  LIBRARY_ALLOW_JSON="{\"matcher\":\"Write|Edit|MultiEdit\",\"hooks\":[{\"type\":\"command\",\"command\":\"$LIBRARY_ALLOW_DEST\",\"timeout\":3}]}"
+  jq --argjson hook "$LIBRARY_ALLOW_JSON" '
+    .hooks.PreToolUse = (.hooks.PreToolUse // []) + [$hook]
+  ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+
+  echo "  $(msg 'PreToolUse 훅 등록: library-allow.sh' 'PreToolUse hook registered: library-allow.sh')"
+fi
+
 # --- SessionStart 자동 업데이트 체크 훅 등록 ---
 UPDATE_CHECK_DEST="$CLAUDE_DIR/hooks/learnings-update-check.sh"
 
