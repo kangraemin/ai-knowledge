@@ -559,13 +559,18 @@ if command -v jq >/dev/null 2>&1; then
   if jq -e '.permissions.allow // [] | map(select(test("claude-library"))) | length > 0' "$SETTINGS" >/dev/null 2>&1; then
     echo "  $(msg 'library 경로 권한 이미 존재 — 스킵' 'Library path permissions already exist — skipped')"
   else
-    jq '
+    jq --arg home "$HOME" '
       .permissions.allow = ((.permissions.allow // []) + [
         "Write(~/.claude/.claude-library/**)",
-        "Edit(~/.claude/.claude-library/**)"
+        "Edit(~/.claude/.claude-library/**)",
+        ("Write(" + $home + "/.claude/.claude-library/**)"),
+        ("Edit(" + $home + "/.claude/.claude-library/**)")
+      ] | unique) |
+      .permissions.additionalDirectories = ((.permissions.additionalDirectories // []) + [
+        ($home + "/.claude/.claude-library")
       ] | unique)
     ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
-    echo "  $(msg 'library 경로 Write/Edit 권한 등록' 'Library path Write/Edit permissions registered')"
+    echo "  $(msg 'library 경로 Write/Edit 권한 등록 (절대경로 + additionalDirectories 포함)' 'Library path Write/Edit permissions registered (with absolute path + additionalDirectories)')"
   fi
 fi
 

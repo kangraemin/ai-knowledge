@@ -99,13 +99,18 @@ if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
   if jq -e '.permissions.allow // [] | map(select(test("claude-library"))) | length > 0' "$SETTINGS" >/dev/null 2>&1; then
     skip "library 경로 권한 이미 존재"
   else
-    jq '
+    jq --arg home "$HOME" '
       .permissions.allow = ((.permissions.allow // []) + [
         "Write(~/.claude/.claude-library/**)",
-        "Edit(~/.claude/.claude-library/**)"
+        "Edit(~/.claude/.claude-library/**)",
+        ("Write(" + $home + "/.claude/.claude-library/**)"),
+        ("Edit(" + $home + "/.claude/.claude-library/**)")
+      ] | unique) |
+      .permissions.additionalDirectories = ((.permissions.additionalDirectories // []) + [
+        ($home + "/.claude/.claude-library")
       ] | unique)
     ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
-    ok "library 경로 Write/Edit 권한 추가"
+    ok "library 경로 Write/Edit 권한 추가 (절대경로 + additionalDirectories 포함)"
     UPDATED=$((UPDATED + 1))
   fi
 fi
