@@ -11,6 +11,7 @@ case "$TOOL" in
 esac
 
 FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""')
+FILE_PATH="${FILE_PATH/#\~/$HOME}"
 LIB_DIR="$HOME/.claude/.claude-library"
 
 if [[ "$FILE_PATH" == "$LIB_DIR/"* ]]; then
