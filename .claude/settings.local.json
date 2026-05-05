@@ -4,7 +4,9 @@
       "mcp__claude-library__library_search",
       "mcp__claude-library__library_list",
       "mcp__claude-library__library_read",
-      "Skill(update-config)"
+      "Skill(update-config)",
+      "Bash(mkdir -p ~/.claude/.claude-library/library/api/github)",
+      "Bash(mkdir -p ~/.claude/.claude-library/library/tooling/claude-code)"
     ]
   }
 }
