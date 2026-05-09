@@ -58,7 +58,7 @@ copy_if_changed "$PACKAGE_DIR/scripts/update-check.sh" "$HOOK_DIR/learnings-upda
 copy_if_changed "$PACKAGE_DIR/hooks/code-lesson-check.sh" "$HOOK_DIR/code-lesson-check.sh" "code-lesson-check.sh (stop hook)"
 copy_if_changed "$PACKAGE_DIR/hooks/library-allow.sh" "$HOOK_DIR/library-allow.sh" "library-allow.sh (pretooluse hook)"
 copy_if_changed "$PACKAGE_DIR/GUIDE.md" "$LIB_DIR/GUIDE.md" "GUIDE.md"
-copy_if_changed "$PACKAGE_DIR/TAXONOMY.md" "$HOME/.claude/TAXONOMY.md" "TAXONOMY.md"
+copy_if_changed "$PACKAGE_DIR/TAXONOMY.md" "$LIB_DIR/TAXONOMY.md" "TAXONOMY.md"
 
 # Notion library 스크립트 (있으면 업데이트)
 SCRIPTS_DIR="$HOME/.claude/scripts"

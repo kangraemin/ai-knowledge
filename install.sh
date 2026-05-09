@@ -126,10 +126,10 @@ library/
 EOF
 fi
 
-if [ ! -f "$HOME/.claude/TAXONOMY.md" ]; then
+if [ ! -f "$LIB_DIR/TAXONOMY.md" ]; then
   curl -sf --max-time 10 "https://raw.githubusercontent.com/kangraemin/learnings-for-claude/main/TAXONOMY.md" \
-    -o "$HOME/.claude/TAXONOMY.md" 2>/dev/null || \
-  cp "$SCRIPT_DIR/TAXONOMY.md" "$HOME/.claude/TAXONOMY.md" 2>/dev/null || true
+    -o "$LIB_DIR/TAXONOMY.md" 2>/dev/null || \
+  cp "$SCRIPT_DIR/TAXONOMY.md" "$LIB_DIR/TAXONOMY.md" 2>/dev/null || true
 fi
 
 if [ ! -f "$LIB_DIR/library/_template.md" ]; then

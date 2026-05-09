@@ -37,7 +37,7 @@ description: 세션에서 배울게있는지 정리하고 library에 저장. '�
 Library 경로: `~/claude-library/library/`
 
 ### 분류
-**`~/.claude/TAXONOMY.md`를 먼저 확인한다.**
+**`~/claude-library/TAXONOMY.md`를 먼저 확인한다.**
 
 - 매칭되는 카테고리/서브카테고리가 있으면 그곳에 저장
 - 없으면 TAXONOMY.md에 먼저 추가 후 저장
