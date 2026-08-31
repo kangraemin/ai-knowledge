@@ -123,14 +123,14 @@ wheels = [
 
 [[package]]
 name = "claude-library-mcp"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "." }
 dependencies = [
     { name = "mcp", extra = ["cli"] },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "mcp", extras = ["cli"], specifier = ">=1.0.0" }]
+requires-dist = [{ name = "mcp", extras = ["cli"], specifier = ">=1.0.0,<2" }]
 
 [[package]]
 name = "click"

@@ -567,7 +567,7 @@ if command -v jq >/dev/null 2>&1; then
   fi
   jq '.mcpServers["claude-library"] = {
     "command": "uvx",
-    "args": ["claude-library-mcp"],
+    "args": ["--with", "mcp<2", "claude-library-mcp"],
     "env": {"LIBRARY_ROOT": ($home + "/claude-library")}
   }' --arg home "$HOME" "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
   echo "  $(msg 'MCP 서버 등록: claude-library-mcp (uvx)' 'MCP server registered: claude-library-mcp (uvx)')"
