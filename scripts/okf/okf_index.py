@@ -4,8 +4,35 @@ import re, json, pathlib, datetime, subprocess, collections
 
 ROOT = pathlib.Path.home() / "claude-library"
 RESERVED = {"index.md", "log.md"}
-_PRES = pathlib.Path(__file__).parent / "index_preserve.json"
-PRESERVE = json.load(open(_PRES)) if _PRES.exists() else {}
+FM_KEY = re.compile(r"^(name|description|type|status|tags|generated|source_session"
+                    r"|durability|metadata|okf_version|title|repo|category)\s*:")
+
+
+def read_preserved(index_path):
+    """재생성 대상 index.md 자신에서 사람이 쓴 부분을 읽는다.
+
+    이전 구현은 커밋되지 않은 사이드카 JSON에 의존해, 그 파일이 없으면
+    조용히 보존이 꺼지고 소개 산문·`관련:` 태그를 삭제했다. 외부 상태에
+    의존하지 않도록 입력을 파일 자신으로 바꾼다 — 몇 번을 돌려도 같다.
+    """
+    keep = {"intro": [], "related": []}
+    if not index_path.exists():
+        return keep
+    in_related = False
+    for line in index_path.read_text(encoding="utf-8").splitlines():
+        st = line.strip()
+        if st.startswith("# "):
+            in_related = st == "# 관련 주제"
+            continue
+        if not st or st.startswith(("*", "-", "|", "[")) or st == "---":
+            continue
+        if FM_KEY.match(st):
+            continue
+        (keep["related"] if in_related else keep["intro"]).append(st)
+    # 관련 태그는 본문 어디에 있든 관련 항목으로 취급
+    keep["intro"] = [l for l in keep["intro"] if not l.startswith("관련:")] 
+    keep["related"] += [l for l in keep["intro"] if l.startswith("관련:")]
+    return keep
 
 
 def fm_of(p):
@@ -49,7 +76,7 @@ def gen_index(d: pathlib.Path):
     out.append(f"# {name}")
     out.append("")
 
-    keep = PRESERVE.get(str(d.relative_to(ROOT) / "index.md"), {})
+    keep = read_preserved(d / "index.md")
     if keep.get("intro"):
         out.extend(keep["intro"]); out.append("")
 
