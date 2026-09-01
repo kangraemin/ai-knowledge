@@ -1,6 +1,6 @@
 #!/bin/bash
-# policy-inject: SessionStart hook
-# 현재 레포의 active 정책(Decision History)을 세션 컨텍스트에 주입한다.
+# decision-inject: SessionStart hook
+# 현재 레포의 active 결정사항(Decision History)을 세션 컨텍스트에 주입한다.
 # 정책은 pull(검색)이 아니라 push(자동 주입)여야 지켜진다.
 
 command -v jq &>/dev/null || exit 0
@@ -17,15 +17,15 @@ if [ -z "$REPO" ]; then
 fi
 [ -n "$REPO" ] || exit 0
 
-POLICY_DIR="$HOME/claude-library/policy/$REPO"
-[ -d "$POLICY_DIR" ] || exit 0
+DECISION_DIR="$HOME/claude-library/decisions/$REPO"
+[ -d "$DECISION_DIR" ] || exit 0
 
 # OKF §5.4 status 가 stable/draft 인 것만 (deprecated 제외), category별로 묶어서
 BODY=$(
   for CAT in architecture stack convention process scope; do
-    [ -d "$POLICY_DIR/$CAT" ] || continue
+    [ -d "$DECISION_DIR/$CAT" ] || continue
     FIRST=1
-    for F in "$POLICY_DIR/$CAT"/*.md; do
+    for F in "$DECISION_DIR/$CAT"/*.md; do
       [ -f "$F" ] || continue
       grep -qE '^status: *(stable|draft)' "$F" || continue
       if [ $FIRST -eq 1 ]; then
@@ -45,13 +45,13 @@ BODY=$(
 
 COUNT=$(printf '%s' "$BODY" | grep -c '^- \*\*')
 
-CONTEXT="# 이 레포($REPO)의 확정된 정책 ${COUNT}건
+CONTEXT="# 이 레포($REPO)의 확정된 결정사항 ${COUNT}건
 
 아래는 이 프로젝트에서 **이미 결정된 사항**이다. 지식이 아니라 결정이다.
 새 제안을 하기 전에 여기서 이미 정해졌는지 확인하고, 뒤집으려면 이유를 먼저 밝혀라.
 $BODY
 
-전문은 policy_read(\"policy/$REPO/<category>/<name>.md\") 로 읽는다."
+전문은 decision_read(\"decisions/$REPO/<category>/<name>.md\") 로 읽는다."
 
 jq -n --arg c "$CONTEXT" \
   '{hookSpecificOutput:{hookEventName:"SessionStart", additionalContext:$c}}'

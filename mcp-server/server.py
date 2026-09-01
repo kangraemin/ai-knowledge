@@ -242,7 +242,7 @@ def library_list() -> str:
 
 # --- Policy (Decision History) ---
 
-POLICY_CATEGORIES = ("architecture", "stack", "convention", "process", "scope")
+DECISION_CATEGORIES = ("architecture", "stack", "convention", "process", "scope")
 
 
 def _parse_frontmatter(text: str) -> dict:
@@ -262,16 +262,16 @@ def _parse_frontmatter(text: str) -> dict:
     return meta
 
 
-def _policy_entries(repo: str = "") -> list[dict]:
-    """policy/<repo>/<category>/<slug>.md 를 훑어 항목 리스트를 만든다."""
-    policy_dir = LIBRARY_ROOT / "policy"
-    if not policy_dir.exists():
+def _decision_entries(repo: str = "") -> list[dict]:
+    """decisions/<repo>/<category>/<slug>.md 를 훑어 항목 리스트를 만든다."""
+    decision_dir = LIBRARY_ROOT / "decisions"
+    if not decision_dir.exists():
         return []
 
     entries = []
-    for md in sorted(policy_dir.rglob("*.md")):
+    for md in sorted(decision_dir.rglob("*.md")):
         rel = md.relative_to(LIBRARY_ROOT)
-        parts = rel.parts  # ('policy', repo, category, file)
+        parts = rel.parts  # ('decisions', repo, category, file)
         if len(parts) != 4 or md.name in ("index.md", "log.md"):
             continue
         if repo and parts[1] != repo:
@@ -292,7 +292,7 @@ def _policy_entries(repo: str = "") -> list[dict]:
     return entries
 
 
-def _policy_title(entry: dict) -> str:
+def _decision_title(entry: dict) -> str:
     """본문 첫 # 헤딩을 제목으로."""
     for line in entry["body"].splitlines():
         if line.startswith("# "):
@@ -300,7 +300,7 @@ def _policy_title(entry: dict) -> str:
     return entry["name"]
 
 
-def _policy_decision(entry: dict) -> str:
+def _decision_outcome(entry: dict) -> str:
     """MADR `## Decision Outcome` 섹션 본문."""
     lines = entry["body"].splitlines()
     out, capture = [], False
@@ -316,39 +316,39 @@ def _policy_decision(entry: dict) -> str:
 
 
 @mcp.tool()
-def policy_list(repo: str) -> str:
+def decision_list(repo: str) -> str:
     """
-    특정 레포의 활성 정책(Decision History)을 모두 반환한다.
+    특정 레포의 활성 결정사항(Decision History)을 모두 반환한다.
     "이 프로젝트에선 이렇게 하기로 했다"는 결정들이다 — 지식(library_search)과 다르다.
 
     Args:
         repo: git remote basename (예: "ai-bouncer", "coinbot", "stock-bot")
     """
-    entries = [e for e in _policy_entries(repo) if e["status"] != "deprecated"]
+    entries = [e for e in _decision_entries(repo) if e["status"] != "deprecated"]
     if not entries:
-        return f"'{repo}' 레포에 등록된 활성 정책 없음."
+        return f"'{repo}' 레포에 등록된 활성 결정사항 없음."
 
     by_cat: dict[str, list[dict]] = {}
     for e in entries:
         by_cat.setdefault(e["category"], []).append(e)
 
-    out = [f"# {repo} 정책 ({len(entries)}건)"]
-    for cat in POLICY_CATEGORIES:
+    out = [f"# {repo} 결정사항 ({len(entries)}건)"]
+    for cat in DECISION_CATEGORIES:
         if cat not in by_cat:
             continue
         out.append(f"\n## {cat}")
         for e in by_cat[cat]:
-            out.append(f"- **{_policy_title(e)}** (`{e['name']}`)")
-            d = _policy_decision(e)
+            out.append(f"- **{_decision_title(e)}** (`{e['name']}`)")
+            d = _decision_outcome(e)
             if d:
                 out.append(f"  - {d}")
     return "\n".join(out)
 
 
 @mcp.tool()
-def policy_search(query: str, repo: str = "") -> str:
+def decision_search(query: str, repo: str = "") -> str:
     """
-    정책(Decision History)을 검색한다. 결정 내용·이유로 찾는다.
+    결정사항(Decision History)을 검색한다. 결정 내용·이유로 찾는다.
     지식이 아니라 "우리가 이렇게 하기로 정한 것"을 찾을 때 쓴다.
 
     Args:
@@ -360,7 +360,7 @@ def policy_search(query: str, repo: str = "") -> str:
         return "검색어 없음."
 
     scored = []
-    for e in _policy_entries(repo):
+    for e in _decision_entries(repo):
         hay = (e["name"] + " " + e["body"]).lower()
         score = sum(1 for t in terms if _word_match(t, hay))
         if score:
@@ -369,15 +369,15 @@ def policy_search(query: str, repo: str = "") -> str:
             scored.append((score, e))
 
     if not scored:
-        return f"'{query}' 관련 정책 없음."
+        return f"'{query}' 관련 결정사항 없음."
 
     scored.sort(key=lambda x: -x[0])
     out = []
     for _, e in scored[:8]:
         mark = "" if e["status"] == "stable" else f" [{e['status']}]"
         out.append(f"## {e['repo']}/{e['category']}/{e['name']}{mark}")
-        out.append(f"> {_policy_title(e)}")
-        d = _policy_decision(e)
+        out.append(f"> {_decision_title(e)}")
+        d = _decision_outcome(e)
         if d:
             out.append(d)
         out.append(f"`{e['path']}`\n")
@@ -385,12 +385,12 @@ def policy_search(query: str, repo: str = "") -> str:
 
 
 @mcp.tool()
-def policy_read(path: str) -> str:
+def decision_read(path: str) -> str:
     """
-    정책 파일 전문을 읽는다. policy_search/policy_list 결과의 경로를 넘긴다.
+    결정사항 파일 전문을 읽는다. decision_search/decision_list 결과의 경로를 넘긴다.
 
     Args:
-        path: policy/ 로 시작하는 상대 경로
+        path: decision/ 로 시작하는 상대 경로
     """
     full = LIBRARY_ROOT / path
     if not full.exists():

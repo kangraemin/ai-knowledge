@@ -422,22 +422,22 @@ EOF
   echo "  $(msg 'SessionStart 자동 업데이트 체크 등록' 'SessionStart auto-update check registered')"
 fi
 
-# --- policy 훅 설치 (정책 주입 + 활동 로그) ---
-for H in policy-inject library-activity-log; do
+# --- decision 훅 설치 (결정사항 주입 + 활동 로그) ---
+for H in decision-inject library-activity-log; do
   cp "$SCRIPT_DIR/hooks/$H.sh" "$CLAUDE_DIR/hooks/$H.sh"
   chmod +x "$CLAUDE_DIR/hooks/$H.sh"
 done
 
 if command -v jq >/dev/null 2>&1; then
-  # SessionStart: 현재 레포의 active 정책 주입
-  if ! grep -qF "policy-inject.sh" "$SETTINGS" 2>/dev/null; then
-    jq --argjson hook "{\"hooks\":[{\"type\":\"command\",\"command\":\"$CLAUDE_DIR/hooks/policy-inject.sh\",\"timeout\":10}]}" \
+  # SessionStart: 현재 레포의 active 결정사항 주입
+  if ! grep -qF "decision-inject.sh" "$SETTINGS" 2>/dev/null; then
+    jq --argjson hook "{\"hooks\":[{\"type\":\"command\",\"command\":\"$CLAUDE_DIR/hooks/decision-inject.sh\",\"timeout\":10}]}" \
       '.hooks.SessionStart = (.hooks.SessionStart // []) + [$hook]' \
       "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
-    echo "  $(msg 'SessionStart 정책 주입 훅 등록' 'SessionStart policy inject hook registered')"
+    echo "  $(msg 'SessionStart 결정사항 주입 훅 등록' 'SessionStart decision inject hook registered')"
   fi
 
-  # PostToolUse: library/policy 쓰기 활동 로그
+  # PostToolUse: library/decision 쓰기 활동 로그
   if ! grep -qF "library-activity-log.sh" "$SETTINGS" 2>/dev/null; then
     jq --argjson hook "{\"matcher\":\"Write|Edit|MultiEdit\",\"hooks\":[{\"type\":\"command\",\"command\":\"$CLAUDE_DIR/hooks/library-activity-log.sh\",\"timeout\":10}]}" \
       '.hooks.PostToolUse = (.hooks.PostToolUse // []) + [$hook]' \

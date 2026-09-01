@@ -108,8 +108,8 @@ def gen_index(d: pathlib.Path):
 
 count = 0
 for d in sorted(set([ROOT] + [p.parent for p in (ROOT / "library").rglob("*.md")]
-                    + [p.parent for p in (ROOT / "policy").rglob("*.md")]
-                    + [ROOT / "library", ROOT / "policy"])):
+                    + [p.parent for p in (ROOT / "decisions").rglob("*.md")]
+                    + [ROOT / "library", ROOT / "decisions"])):
     txt = gen_index(d)
     if txt:
         (d / "index.md").write_text(txt, encoding="utf-8")
@@ -118,7 +118,7 @@ print("index.md 생성:", count)
 
 # --- §9 log.md : git 이력에서 생성 ---
 out = subprocess.run(["git", "-C", str(ROOT), "log", "--format=@%aI|%s", "--name-status",
-                      "--diff-filter=AM", "--", "library", "policy"],
+                      "--diff-filter=AM", "--", "library", "decisions"],
                      capture_output=True, text=True).stdout
 days = collections.OrderedDict()
 cur = None
@@ -154,7 +154,7 @@ DOCS = {
     "GUIDE.md": ("Reference", "Library 작성 가이드 — 지식 문서의 구조·분류·형식"),
     "TAXONOMY.md": ("Reference", "지식 분류 체계 — 카테고리/서브카테고리 등록부"),
     "CHANGELOG.md": ("Reference", "claude-library 변경 이력"),
-    "policy/POLICY-GUIDE.md": ("Reference", "정책(Decision History) 작성 가이드"),
+    "decision/POLICY-GUIDE.md": ("Reference", "결정사항(Decision History) 작성 가이드"),
 }
 now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 for rel, (typ, desc) in DOCS.items():

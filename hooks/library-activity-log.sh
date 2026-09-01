@@ -1,6 +1,6 @@
 #!/bin/bash
 # library-activity-log: PostToolUse hook
-# ~/claude-library/{library,policy}/ 쓰기를 .activity/YYYY-MM.jsonl 에 append
+# ~/claude-library/{library,decision}/ 쓰기를 .activity/YYYY-MM.jsonl 에 append
 
 command -v jq &>/dev/null || exit 0
 
@@ -18,10 +18,10 @@ FILE_PATH="${FILE_PATH/#\~/$HOME}"
 
 LIB_DIR="$HOME/claude-library"
 
-# library/ 또는 policy/ 하위 .md 만 기록
+# library/ 또는 decision/ 하위 .md 만 기록
 case "$FILE_PATH" in
   "$LIB_DIR"/library/*.md) KIND="knowledge" ;;
-  "$LIB_DIR"/policy/*.md)  KIND="policy" ;;
+  "$LIB_DIR"/decision/*.md)  KIND="decisions" ;;
   *) exit 0 ;;
 esac
 
@@ -35,14 +35,14 @@ else
 fi
 
 # supersede 표시가 본문에 있으면 우선
-if [ "$KIND" = "policy" ] && grep -q "^superseded_by:" "$FILE_PATH" 2>/dev/null; then
+if [ "$KIND" = "decisions" ] && grep -q "^superseded_by:" "$FILE_PATH" 2>/dev/null; then
   ACTION="supersede"
 fi
 
-# policy는 경로에서 repo/category 추출: policy/<repo>/<category>/<file>.md
+# policy는 경로에서 repo/category 추출: decisions/<repo>/<category>/<file>.md
 REPO=""
 CATEGORY=""
-if [ "$KIND" = "policy" ]; then
+if [ "$KIND" = "decisions" ]; then
   REPO=$(echo "$REL" | cut -d/ -f2)
   CATEGORY=$(echo "$REL" | cut -d/ -f3)
 else
