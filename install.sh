@@ -422,6 +422,30 @@ EOF
   echo "  $(msg 'SessionStart 자동 업데이트 체크 등록' 'SessionStart auto-update check registered')"
 fi
 
+# --- policy 훅 설치 (정책 주입 + 활동 로그) ---
+for H in policy-inject library-activity-log; do
+  cp "$SCRIPT_DIR/hooks/$H.sh" "$CLAUDE_DIR/hooks/$H.sh"
+  chmod +x "$CLAUDE_DIR/hooks/$H.sh"
+done
+
+if command -v jq >/dev/null 2>&1; then
+  # SessionStart: 현재 레포의 active 정책 주입
+  if ! grep -qF "policy-inject.sh" "$SETTINGS" 2>/dev/null; then
+    jq --argjson hook "{\"hooks\":[{\"type\":\"command\",\"command\":\"$CLAUDE_DIR/hooks/policy-inject.sh\",\"timeout\":10}]}" \
+      '.hooks.SessionStart = (.hooks.SessionStart // []) + [$hook]' \
+      "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+    echo "  $(msg 'SessionStart 정책 주입 훅 등록' 'SessionStart policy inject hook registered')"
+  fi
+
+  # PostToolUse: library/policy 쓰기 활동 로그
+  if ! grep -qF "library-activity-log.sh" "$SETTINGS" 2>/dev/null; then
+    jq --argjson hook "{\"matcher\":\"Write|Edit|MultiEdit\",\"hooks\":[{\"type\":\"command\",\"command\":\"$CLAUDE_DIR/hooks/library-activity-log.sh\",\"timeout\":10}]}" \
+      '.hooks.PostToolUse = (.hooks.PostToolUse // []) + [$hook]' \
+      "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+    echo "  $(msg 'PostToolUse 활동 로그 훅 등록' 'PostToolUse activity log hook registered')"
+  fi
+fi
+
 # --- session-review 스킬 설치 ---
 SKILL_DIR="$CLAUDE_DIR/skills/session-review"
 if [ -d "$SKILL_DIR" ]; then
