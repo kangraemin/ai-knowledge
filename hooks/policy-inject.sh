@@ -34,7 +34,7 @@ BODY=$(
       fi
       TITLE=$(grep -m1 '^# ' "$F" | sed 's/^# //')
       # "## 결정" 다음 첫 비어있지 않은 줄
-      DECISION=$(awk '/^## 결정/{f=1;next} f&&NF{print;exit}' "$F")
+      DECISION=$(awk '/^## Decision Outcome/{f=1;next} f&&NF{print;exit}' "$F")
       printf -- '- **%s**\n' "$TITLE"
       [ -n "$DECISION" ] && printf -- '  %s\n' "$DECISION"
     done

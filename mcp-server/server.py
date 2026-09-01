@@ -301,14 +301,14 @@ def _policy_title(entry: dict) -> str:
 
 
 def _policy_decision(entry: dict) -> str:
-    """## 결정 섹션 본문."""
+    """MADR `## Decision Outcome` 섹션 본문."""
     lines = entry["body"].splitlines()
     out, capture = [], False
     for line in lines:
         if line.startswith("## "):
             if capture:
                 break
-            capture = line.strip() == "## 결정"
+            capture = line.strip() == "## Decision Outcome"  # MADR
             continue
         if capture and line.strip():
             out.append(line.strip())
