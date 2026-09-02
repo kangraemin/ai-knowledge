@@ -113,7 +113,7 @@ The installer configures this automatically in `~/.claude/settings.json`:
   "mcpServers": {
     "claude-library": {
       "command": "uvx",
-      "args": ["claude-library-mcp"],
+      "args": ["--with", "mcp<2", "claude-library-mcp@latest"],
       "env": {
         "LIBRARY_ROOT": "~/claude-library"
       }

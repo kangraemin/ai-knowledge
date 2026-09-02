@@ -28,7 +28,7 @@ if command -v jq &>/dev/null && grep -qF "library-sync" "$SETTINGS" 2>/dev/null;
   echo ""
   echo "  SessionEnd/PostCompact 훅도 제거하시겠습니까?"
   printf "  [y/N] "
-  read -r answer
+  read -r answer </dev/tty 2>/dev/null || answer="n"
   if [[ "$answer" =~ ^[Yy]$ ]]; then
     jq '
       .hooks.SessionEnd = [(.hooks.SessionEnd // [])[] | select((.hooks[0].command // "") | contains("library-sync") | not)] |
@@ -43,10 +43,16 @@ if command -v jq &>/dev/null && grep -qF "library-sync" "$SETTINGS" 2>/dev/null;
 fi
 
 echo ""
-echo "완료. ~/.claude/library/ 와 ~/.claude/LIBRARY.md 는 유지됩니다."
+echo "완료. ~/claude-library/ (지식·결정사항) 는 유지됩니다."
 
 # 3. decision / 활동로그 훅 제거 (library-sync 유무와 무관하게 독립 처리)
-if [ -f "$HOOK_DIR/decision-inject.sh" ] || [ -f "$HOOK_DIR/library-activity-log.sh" ] || [ -f "$HOOK_DIR/policy-inject.sh" ]; then
+_lfc_installed=0
+for _h in decision-inject library-activity-log policy-inject library-save-check \
+          code-lesson-check library-allow learnings-update-check library-sync; do
+  [ -f "$HOOK_DIR/$_h.sh" ] && _lfc_installed=1
+done
+grep -qE "decision-inject|library-activity-log|library-save-check|code-lesson-check|library-allow|learnings-update-check" "$SETTINGS" 2>/dev/null && _lfc_installed=1
+if [ "$_lfc_installed" = "1" ]; then
   rm -f "$HOOK_DIR/decision-inject.sh" "$HOOK_DIR/library-activity-log.sh" "$HOOK_DIR/policy-inject.sh" \
         "$HOOK_DIR/library-save-check.sh" "$HOOK_DIR/code-lesson-check.sh" \
         "$HOOK_DIR/library-allow.sh" "$HOOK_DIR/learnings-update-check.sh"
@@ -60,6 +66,15 @@ if [ -f "$HOOK_DIR/decision-inject.sh" ] || [ -f "$HOOK_DIR/library-activity-log
     ' "$SETTINGS" > "$SETTINGS.tmp"; then
       mv "$SETTINGS.tmp" "$SETTINGS"
       echo "  decision/활동로그 훅 제거"
+    fi
+    # MCP 서버 등록·권한·추가 디렉터리도 함께 해제
+    if jq '
+      del(.mcpServers["claude-library"])
+      | .permissions.allow |= ((. // []) | map(select(test("claude-library") | not)))
+      | .permissions.additionalDirectories |= ((. // []) | map(select(test("claude-library") | not)))
+    ' "$SETTINGS" > "$SETTINGS.tmp"; then
+      mv "$SETTINGS.tmp" "$SETTINGS"
+      echo "  MCP 등록·권한 해제"
     else
       rm -f "$SETTINGS.tmp"
       echo "  ⚠️ settings.json 갱신 실패 — 훅 등록이 남았을 수 있다"

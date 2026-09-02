@@ -5,7 +5,7 @@ ROOT = pathlib.Path.home()/"claude-library"
 RESERVED = {"index.md","log.md"}
 ISO = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})")
 STATUS = {"draft","stable","deprecated"}
-fail = {"no_fm":[], "no_type":[], "bad_status":[], "bad_ts":[], "reserved_fm":[]}
+fail = {"no_fm":[], "no_type":[], "no_desc":[], "bad_status":[], "bad_ts":[], "reserved_fm":[]}
 n = 0
 for md in sorted(ROOT.rglob("*.md")):
     if any(part.startswith(".") for part in md.relative_to(ROOT).parts):
@@ -27,6 +27,9 @@ for md in sorted(ROOT.rglob("*.md")):
     m = re.search(r"^type: *(.+)$", fm, re.M)
     if not m or not m.group(1).strip().strip('"'):
         fail["no_type"].append(rel)
+    md_ = re.search(r"^description: *(.+)$", fm, re.M)
+    if not md_ or not md_.group(1).strip().strip('"'):
+        fail["no_desc"].append(rel)
     ms = re.search(r"^status: *(\S+)", fm, re.M)
     if ms and ms.group(1).strip('"') not in STATUS:
         fail["bad_status"].append(rel + " → " + ms.group(1))
@@ -37,6 +40,7 @@ for md in sorted(ROOT.rglob("*.md")):
 print(f"검사 대상 concept: {n}건\n")
 ok = True
 labels = {"no_fm":"§11.1 프론트매터 없음","no_type":"§11.2 type 없음/빈값",
+          "no_desc":"description 없음/빈값 (검색·롤업에 필요)",
           "bad_status":"§5.4 status 어휘 위반","bad_ts":"§5 ISO8601 위반",
           "reserved_fm":"§8 예약파일에 프론트매터"}
 for k, v in fail.items():

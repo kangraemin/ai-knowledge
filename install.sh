@@ -251,6 +251,7 @@ import sys, re
 import os
 target, src = sys.argv[1], sys.argv[2]
 # 신규 설치에는 CLAUDE.md 가 아직 없다. 없으면 새로 만든다 (예전엔 여기서 크래시)
+os.makedirs(os.path.dirname(target) or ".", exist_ok=True)   # 신규 설치엔 .claude/ 자체가 없다
 content = open(target).read() if os.path.exists(target) else ""
 new_block = open(src).read()
 
@@ -266,7 +267,8 @@ PYEOF
   fi
 }
 
-_inject_rules "$GLOBAL_CLAUDE"
+mkdir -p "$(dirname "$GLOBAL_CLAUDE")"
+  _inject_rules "$GLOBAL_CLAUDE"
 
 # --- SessionEnd / PostCompact 훅 등록 ---
 if ! command -v jq >/dev/null 2>&1; then
@@ -417,7 +419,7 @@ EOF
   fi
 
   # 초기 버전 기록
-  curl -sf --max-time 5 "https://api.github.com/repos/kangraemin/learnings-for-claude/commits/main" 2>/dev/null | \
+  curl -sfL --max-time 5 "https://api.github.com/repos/kangraemin/learnings-for-claude/commits/main" 2>/dev/null | \
     python3 -c "import json,sys; print(json.load(sys.stdin)['sha'][:7])" \
     > "$CLAUDE_DIR/hooks/.learnings-version" 2>/dev/null || true
 

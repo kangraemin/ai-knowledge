@@ -113,7 +113,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kangraemin/learnings-for-cla
   "mcpServers": {
     "claude-library": {
       "command": "uvx",
-      "args": ["claude-library-mcp"],
+      "args": ["--with", "mcp<2", "claude-library-mcp@latest"],
       "env": {
         "LIBRARY_ROOT": "~/claude-library"
       }
