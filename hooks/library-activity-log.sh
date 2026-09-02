@@ -1,6 +1,6 @@
 #!/bin/bash
 # library-activity-log: PostToolUse hook
-# ~/claude-library/{library,decision}/ 쓰기를 .activity/YYYY-MM.jsonl 에 append
+# ~/claude-library/{library,decisions}/ 쓰기를 .activity/YYYY-MM.jsonl 에 append
 
 command -v jq &>/dev/null || exit 0
 
@@ -18,7 +18,7 @@ FILE_PATH="${FILE_PATH/#\~/$HOME}"
 
 LIB_DIR="$HOME/claude-library"
 
-# library/ 또는 decision/ 하위 .md 만 기록
+# library/ 또는 decisions/ 하위 .md 만 기록
 case "$FILE_PATH" in
   "$LIB_DIR"/library/*.md) KIND="knowledge" ;;
   "$LIB_DIR"/decisions/*.md) KIND="decision" ;;
@@ -39,7 +39,7 @@ if [ "$KIND" = "decision" ] && grep -q "^superseded_by:" "$FILE_PATH" 2>/dev/nul
   ACTION="supersede"
 fi
 
-# policy는 경로에서 repo/category 추출: decisions/<repo>/<category>/<file>.md
+# decision 은 경로에서 repo/category 추출: decisions/<repo>/<category>/<file>.md
 REPO=""
 CATEGORY=""
 if [ "$KIND" = "decision" ]; then

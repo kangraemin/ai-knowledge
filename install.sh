@@ -426,10 +426,15 @@ fi
 if [ -f "$CLAUDE_DIR/hooks/policy-inject.sh" ]; then
   rm -f "$CLAUDE_DIR/hooks/policy-inject.sh"
   if command -v jq >/dev/null 2>&1; then
-    jq '(.hooks.SessionStart // []) |= map(
-          .hooks |= map(select(.command | test("policy-inject.sh") | not))
-        ) | (.hooks.SessionStart // []) |= map(select(.hooks | length > 0))' \
-      "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+    # `(.hooks.X // []) |= f` 는 키가 없으면 Invalid path expression 이 된다
+    if jq '.hooks.SessionStart |= ((. // [])
+            | map(.hooks |= map(select((.command // "") | test("policy-inject.sh") | not)))
+            | map(select((.hooks | length) > 0)))' \
+      "$SETTINGS" > "$SETTINGS.tmp"; then
+      mv "$SETTINGS.tmp" "$SETTINGS"
+    else
+      rm -f "$SETTINGS.tmp"
+    fi
   fi
   echo "  $(msg '구버전 policy-inject 훅 제거' 'removed legacy policy-inject hook')"
 fi

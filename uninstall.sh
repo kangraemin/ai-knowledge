@@ -3,7 +3,8 @@ set -e
 
 TARGET="${1:-$(pwd)}"
 SETTINGS="$HOME/.claude/settings.json"
-HOOK_DEST="$HOME/.claude/hooks/library-sync.sh"
+HOOK_DIR="$HOME/.claude/hooks"
+HOOK_DEST="$HOOK_DIR/library-sync.sh"
 
 echo "learnings-for-claude 제거 중..."
 
@@ -35,15 +36,6 @@ if command -v jq &>/dev/null && grep -qF "library-sync" "$SETTINGS" 2>/dev/null;
     ' "$SETTINGS" > "$SETTINGS.tmp"
     mv "$SETTINGS.tmp" "$SETTINGS"
     rm -f "$HOOK_DEST"
-# 결정사항/활동로그 훅도 함께 제거
-rm -f "$CLAUDE_DIR/hooks/decision-inject.sh" "$CLAUDE_DIR/hooks/library-activity-log.sh" "$CLAUDE_DIR/hooks/policy-inject.sh"
-if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
-  jq '(.hooks.SessionStart // []) |= map(.hooks |= map(select(.command | test("decision-inject.sh|policy-inject.sh") | not)))
-    | (.hooks.PostToolUse // []) |= map(.hooks |= map(select(.command | test("library-activity-log.sh") | not)))
-    | (.hooks.SessionStart // []) |= map(select(.hooks | length > 0))
-    | (.hooks.PostToolUse // []) |= map(select(.hooks | length > 0))' \
-    "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
-fi
     echo "  훅 제거"
   else
     echo "  스킵"
@@ -52,3 +44,20 @@ fi
 
 echo ""
 echo "완료. ~/.claude/library/ 와 ~/.claude/LIBRARY.md 는 유지됩니다."
+
+# 3. decision / 활동로그 훅 제거 (library-sync 유무와 무관하게 독립 처리)
+if [ -f "$HOOK_DIR/decision-inject.sh" ] || [ -f "$HOOK_DIR/library-activity-log.sh" ] || [ -f "$HOOK_DIR/policy-inject.sh" ]; then
+  rm -f "$HOOK_DIR/decision-inject.sh" "$HOOK_DIR/library-activity-log.sh" "$HOOK_DIR/policy-inject.sh"
+  if command -v jq &>/dev/null && [ -f "$SETTINGS" ]; then
+    if jq '
+      .hooks.SessionStart |= ((. // []) | map(.hooks |= map(select((.command // "") | test("decision-inject.sh|policy-inject.sh") | not))) | map(select((.hooks | length) > 0)))
+      | .hooks.PostToolUse |= ((. // []) | map(.hooks |= map(select((.command // "") | test("library-activity-log.sh") | not))) | map(select((.hooks | length) > 0)))
+    ' "$SETTINGS" > "$SETTINGS.tmp"; then
+      mv "$SETTINGS.tmp" "$SETTINGS"
+      echo "  decision/활동로그 훅 제거"
+    else
+      rm -f "$SETTINGS.tmp"
+      echo "  ⚠️ settings.json 갱신 실패 — 훅 등록이 남았을 수 있다"
+    fi
+  fi
+fi

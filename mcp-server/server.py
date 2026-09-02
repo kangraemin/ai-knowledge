@@ -158,10 +158,19 @@ def _search(query: str) -> list[dict]:
     return [entry for _, entry in scored[:7]]
 
 
+def _safe_path(rel_path: str):
+    """번들 밖으로 나가는 경로를 거부한다 (../ 탈출 방지)."""
+    full = (LIBRARY_ROOT / rel_path).resolve()
+    root = LIBRARY_ROOT.resolve()
+    if full != root and not str(full).startswith(str(root) + "/"):
+        return None
+    return full
+
+
 def _read_topic(rel_path: str) -> str:
     """index.md 내용 읽기"""
-    full_path = LIBRARY_ROOT / rel_path
-    if full_path.exists():
+    full_path = _safe_path(rel_path)
+    if full_path and full_path.exists():
         return _read_file(full_path)
     return ""
 
@@ -220,7 +229,9 @@ def library_read(path: str) -> str:
     Args:
         path: library/ 로 시작하는 상대 경로 (예: "library/equity/vix-filter/index.md")
     """
-    full_path = LIBRARY_ROOT / path
+    full_path = _safe_path(path)
+    if full_path is None:
+        return f"{path} 는 라이브러리 밖이다"
     if not full_path.exists():
         return f"파일 없음: {path}"
     return _read_file(full_path)
@@ -392,9 +403,8 @@ def decision_read(path: str) -> str:
     Args:
         path: decisions/ 로 시작하는 상대 경로
     """
-    full = (LIBRARY_ROOT / path).resolve()
-    # 번들 밖으로 나가는 경로는 거부한다 (../ 탈출 방지)
-    if not str(full).startswith(str(LIBRARY_ROOT.resolve()) + "/"):
+    full = _safe_path(path)
+    if full is None:
         return f"{path} 는 라이브러리 밖이다"
     if not full.exists():
         return f"{path} 없음"
