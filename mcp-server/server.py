@@ -240,7 +240,7 @@ def library_list() -> str:
     return "인덱스 없음 (index.md / LIBRARY.md 둘 다 부재)"
 
 
-# --- Policy (Decision History) ---
+# --- Decision Records (MADR) ---
 
 DECISION_CATEGORIES = ("architecture", "stack", "convention", "process", "scope")
 
@@ -390,9 +390,12 @@ def decision_read(path: str) -> str:
     결정사항 파일 전문을 읽는다. decision_search/decision_list 결과의 경로를 넘긴다.
 
     Args:
-        path: decision/ 로 시작하는 상대 경로
+        path: decisions/ 로 시작하는 상대 경로
     """
-    full = LIBRARY_ROOT / path
+    full = (LIBRARY_ROOT / path).resolve()
+    # 번들 밖으로 나가는 경로는 거부한다 (../ 탈출 방지)
+    if not str(full).startswith(str(LIBRARY_ROOT.resolve()) + "/"):
+        return f"{path} 는 라이브러리 밖이다"
     if not full.exists():
         return f"{path} 없음"
     return _read_file(full)

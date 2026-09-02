@@ -21,7 +21,7 @@ LIB_DIR="$HOME/claude-library"
 # library/ 또는 decision/ 하위 .md 만 기록
 case "$FILE_PATH" in
   "$LIB_DIR"/library/*.md) KIND="knowledge" ;;
-  "$LIB_DIR"/decision/*.md)  KIND="decisions" ;;
+  "$LIB_DIR"/decisions/*.md) KIND="decision" ;;
   *) exit 0 ;;
 esac
 
@@ -35,14 +35,14 @@ else
 fi
 
 # supersede 표시가 본문에 있으면 우선
-if [ "$KIND" = "decisions" ] && grep -q "^superseded_by:" "$FILE_PATH" 2>/dev/null; then
+if [ "$KIND" = "decision" ] && grep -q "^superseded_by:" "$FILE_PATH" 2>/dev/null; then
   ACTION="supersede"
 fi
 
 # policy는 경로에서 repo/category 추출: decisions/<repo>/<category>/<file>.md
 REPO=""
 CATEGORY=""
-if [ "$KIND" = "decisions" ]; then
+if [ "$KIND" = "decision" ]; then
   REPO=$(echo "$REL" | cut -d/ -f2)
   CATEGORY=$(echo "$REL" | cut -d/ -f3)
 else

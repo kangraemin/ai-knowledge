@@ -154,7 +154,7 @@ DOCS = {
     "GUIDE.md": ("Reference", "Library 작성 가이드 — 지식 문서의 구조·분류·형식"),
     "TAXONOMY.md": ("Reference", "지식 분류 체계 — 카테고리/서브카테고리 등록부"),
     "CHANGELOG.md": ("Reference", "claude-library 변경 이력"),
-    "decision/POLICY-GUIDE.md": ("Reference", "결정사항(Decision History) 작성 가이드"),
+    "decisions/DECISIONS-GUIDE.md": ("Reference", "결정사항(Decision Records) 작성 가이드 — MADR 구조"),
 }
 now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 for rel, (typ, desc) in DOCS.items():

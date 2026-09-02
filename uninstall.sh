@@ -35,6 +35,15 @@ if command -v jq &>/dev/null && grep -qF "library-sync" "$SETTINGS" 2>/dev/null;
     ' "$SETTINGS" > "$SETTINGS.tmp"
     mv "$SETTINGS.tmp" "$SETTINGS"
     rm -f "$HOOK_DEST"
+# 결정사항/활동로그 훅도 함께 제거
+rm -f "$CLAUDE_DIR/hooks/decision-inject.sh" "$CLAUDE_DIR/hooks/library-activity-log.sh" "$CLAUDE_DIR/hooks/policy-inject.sh"
+if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
+  jq '(.hooks.SessionStart // []) |= map(.hooks |= map(select(.command | test("decision-inject.sh|policy-inject.sh") | not)))
+    | (.hooks.PostToolUse // []) |= map(.hooks |= map(select(.command | test("library-activity-log.sh") | not)))
+    | (.hooks.SessionStart // []) |= map(select(.hooks | length > 0))
+    | (.hooks.PostToolUse // []) |= map(select(.hooks | length > 0))' \
+    "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+fi
     echo "  훅 제거"
   else
     echo "  스킵"

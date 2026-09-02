@@ -422,6 +422,18 @@ EOF
   echo "  $(msg 'SessionStart 자동 업데이트 체크 등록' 'SessionStart auto-update check registered')"
 fi
 
+# --- 구버전 정리: policy-inject.sh → decision-inject.sh 개명 마이그레이션 ---
+if [ -f "$CLAUDE_DIR/hooks/policy-inject.sh" ]; then
+  rm -f "$CLAUDE_DIR/hooks/policy-inject.sh"
+  if command -v jq >/dev/null 2>&1; then
+    jq '(.hooks.SessionStart // []) |= map(
+          .hooks |= map(select(.command | test("policy-inject.sh") | not))
+        ) | (.hooks.SessionStart // []) |= map(select(.hooks | length > 0))' \
+      "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+  fi
+  echo "  $(msg '구버전 policy-inject 훅 제거' 'removed legacy policy-inject hook')"
+fi
+
 # --- decision 훅 설치 (결정사항 주입 + 활동 로그) ---
 for H in decision-inject library-activity-log; do
   cp "$SCRIPT_DIR/hooks/$H.sh" "$CLAUDE_DIR/hooks/$H.sh"
