@@ -57,6 +57,8 @@ copy_if_changed "$PACKAGE_DIR/hooks/library-save-check.sh" "$HOOK_DIR/library-sa
 copy_if_changed "$PACKAGE_DIR/scripts/update-check.sh" "$HOOK_DIR/learnings-update-check.sh" "learnings-update-check.sh (script)"
 copy_if_changed "$PACKAGE_DIR/hooks/code-lesson-check.sh" "$HOOK_DIR/code-lesson-check.sh" "code-lesson-check.sh (stop hook)"
 copy_if_changed "$PACKAGE_DIR/hooks/library-allow.sh" "$HOOK_DIR/library-allow.sh" "library-allow.sh (pretooluse hook)"
+copy_if_changed "$PACKAGE_DIR/hooks/decision-inject.sh" "$HOOK_DIR/decision-inject.sh" "decision-inject.sh (sessionstart hook)"
+copy_if_changed "$PACKAGE_DIR/hooks/library-activity-log.sh" "$HOOK_DIR/library-activity-log.sh" "library-activity-log.sh (posttooluse hook)"
 copy_if_changed "$PACKAGE_DIR/GUIDE.md" "$LIB_DIR/GUIDE.md" "GUIDE.md"
 copy_if_changed "$PACKAGE_DIR/TAXONOMY.md" "$LIB_DIR/TAXONOMY.md" "TAXONOMY.md"
 

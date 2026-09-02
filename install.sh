@@ -248,8 +248,10 @@ PYEOF
   else
     python3 - "$target" "$RULES_SRC" << 'PYEOF'
 import sys, re
+import os
 target, src = sys.argv[1], sys.argv[2]
-content = open(target).read()
+# 신규 설치에는 CLAUDE.md 가 아직 없다. 없으면 새로 만든다 (예전엔 여기서 크래시)
+content = open(target).read() if os.path.exists(target) else ""
 new_block = open(src).read()
 
 # ai-bouncer 섹션 앞에 삽입, 없으면 파일 끝에 추가
@@ -608,7 +610,7 @@ if command -v jq >/dev/null 2>&1; then
   fi
   jq '.mcpServers["claude-library"] = {
     "command": "uvx",
-    "args": ["--with", "mcp<2", "claude-library-mcp"],
+    "args": ["--with", "mcp<2", "claude-library-mcp@latest"],
     "env": {"LIBRARY_ROOT": ($home + "/claude-library")}
   }' --arg home "$HOME" "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
   echo "  $(msg 'MCP 서버 등록: claude-library-mcp (uvx)' 'MCP server registered: claude-library-mcp (uvx)')"

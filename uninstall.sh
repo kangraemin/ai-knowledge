@@ -47,11 +47,16 @@ echo "완료. ~/.claude/library/ 와 ~/.claude/LIBRARY.md 는 유지됩니다."
 
 # 3. decision / 활동로그 훅 제거 (library-sync 유무와 무관하게 독립 처리)
 if [ -f "$HOOK_DIR/decision-inject.sh" ] || [ -f "$HOOK_DIR/library-activity-log.sh" ] || [ -f "$HOOK_DIR/policy-inject.sh" ]; then
-  rm -f "$HOOK_DIR/decision-inject.sh" "$HOOK_DIR/library-activity-log.sh" "$HOOK_DIR/policy-inject.sh"
+  rm -f "$HOOK_DIR/decision-inject.sh" "$HOOK_DIR/library-activity-log.sh" "$HOOK_DIR/policy-inject.sh" \
+        "$HOOK_DIR/library-save-check.sh" "$HOOK_DIR/code-lesson-check.sh" \
+        "$HOOK_DIR/library-allow.sh" "$HOOK_DIR/learnings-update-check.sh"
   if command -v jq &>/dev/null && [ -f "$SETTINGS" ]; then
     if jq '
-      .hooks.SessionStart |= ((. // []) | map(.hooks |= map(select((.command // "") | test("decision-inject.sh|policy-inject.sh") | not))) | map(select((.hooks | length) > 0)))
-      | .hooks.PostToolUse |= ((. // []) | map(.hooks |= map(select((.command // "") | test("library-activity-log.sh") | not))) | map(select((.hooks | length) > 0)))
+      def strip(re): map(.hooks |= map(select((.command // "") | test(re) | not))) | map(select((.hooks | length) > 0));
+      .hooks.SessionStart |= ((. // []) | strip("decision-inject.sh|policy-inject.sh|learnings-update-check.sh"))
+      | .hooks.PostToolUse |= ((. // []) | strip("library-activity-log.sh"))
+      | .hooks.PreToolUse  |= ((. // []) | strip("library-allow.sh"))
+      | .hooks.Stop        |= ((. // []) | strip("library-save-check.sh|code-lesson-check.sh"))
     ' "$SETTINGS" > "$SETTINGS.tmp"; then
       mv "$SETTINGS.tmp" "$SETTINGS"
       echo "  decision/활동로그 훅 제거"
