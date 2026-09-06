@@ -55,7 +55,8 @@ grep -qE "decision-inject|library-activity-log|library-save-check|code-lesson-ch
 if [ "$_lfc_installed" = "1" ]; then
   rm -f "$HOOK_DIR/decision-inject.sh" "$HOOK_DIR/library-activity-log.sh" "$HOOK_DIR/policy-inject.sh" \
         "$HOOK_DIR/library-save-check.sh" "$HOOK_DIR/code-lesson-check.sh" \
-        "$HOOK_DIR/library-allow.sh" "$HOOK_DIR/learnings-update-check.sh"
+        "$HOOK_DIR/library-allow.sh" "$HOOK_DIR/learnings-update-check.sh" \
+        "$HOOK_DIR/library-sync.sh"
   if command -v jq &>/dev/null && [ -f "$SETTINGS" ]; then
     if jq '
       def strip(re): map(.hooks |= map(select((.command // "") | test(re) | not))) | map(select((.hooks | length) > 0));
@@ -63,6 +64,8 @@ if [ "$_lfc_installed" = "1" ]; then
       | .hooks.PostToolUse |= ((. // []) | strip("library-activity-log.sh"))
       | .hooks.PreToolUse  |= ((. // []) | strip("library-allow.sh"))
       | .hooks.Stop        |= ((. // []) | strip("library-save-check.sh|code-lesson-check.sh"))
+      | .hooks.SessionEnd   |= ((. // []) | strip("library-sync.sh"))
+      | .hooks.PostCompact  |= ((. // []) | strip("library-sync.sh"))
     ' "$SETTINGS" > "$SETTINGS.tmp"; then
       mv "$SETTINGS.tmp" "$SETTINGS"
       echo "  decision/활동로그 훅 제거"

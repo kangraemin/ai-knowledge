@@ -24,7 +24,9 @@ fi
 # 20번에 1번만 실행 (세션별 독립)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // ""')
-COUNTER_FILE="$HOME/.claude/hooks/.library-check-counter-$SESSION_ID"
+COUNTER_DIR="$HOME/.claude/hooks/.counters"
+mkdir -p "$COUNTER_DIR" 2>/dev/null || exit 0
+COUNTER_FILE="$COUNTER_DIR/.library-check-counter-$SESSION_ID"
 MARKER_FILE="$HOME/.claude/hooks/.library-check-marker-$SESSION_ID"
 COUNT=0
 [ -f "$COUNTER_FILE" ] && COUNT=$(cat "$COUNTER_FILE")

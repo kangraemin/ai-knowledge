@@ -5,6 +5,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_DIR="$HOME/.claude"
 LIB_DIR="$HOME/claude-library"
 SETTINGS="$CLAUDE_DIR/settings.json"
+
+# settings.json 이 깨져 있으면 모든 jq 등록이 조용히 실패한다.
+# 그런데도 "등록" 메시지를 찍고 exit 0 으로 끝나 사용자가 설치됐다고 믿는다.
+if [ -f "$SETTINGS" ] && command -v jq >/dev/null 2>&1; then
+  if ! jq -e . "$SETTINGS" >/dev/null 2>&1; then
+    echo "⛔ $SETTINGS 가 유효한 JSON 이 아니다. 먼저 고친 뒤 다시 실행하라." >&2
+    exit 1
+  fi
+fi
 HOOK_DEST="$CLAUDE_DIR/hooks/library-sync.sh"
 
 # --- 언어 선택 / Language selection ---
@@ -444,9 +453,15 @@ if [ -f "$CLAUDE_DIR/hooks/policy-inject.sh" ]; then
 fi
 
 # --- decision 훅 설치 (결정사항 주입 + 활동 로그) ---
+mkdir -p "$CLAUDE_DIR/hooks"
 for H in decision-inject library-activity-log; do
-  cp "$SCRIPT_DIR/hooks/$H.sh" "$CLAUDE_DIR/hooks/$H.sh"
-  chmod +x "$CLAUDE_DIR/hooks/$H.sh"
+  # 소스가 없으면 건너뛴다 — cp 실패가 set -e 로 설치 전체를 죽이면 안 된다
+  if [ -f "$SCRIPT_DIR/hooks/$H.sh" ]; then
+    cp "$SCRIPT_DIR/hooks/$H.sh" "$CLAUDE_DIR/hooks/$H.sh"
+    chmod +x "$CLAUDE_DIR/hooks/$H.sh"
+  else
+    echo "  $(msg "경고: $H.sh 소스 없음 — 스킵" "warning: $H.sh source missing — skipped")"
+  fi
 done
 
 if command -v jq >/dev/null 2>&1; then
