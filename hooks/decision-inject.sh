@@ -21,6 +21,8 @@ DECISION_DIR="$HOME/claude-library/decisions/$REPO"
 [ -d "$DECISION_DIR" ] || exit 0
 
 # OKF §5.4 status 가 stable/draft 인 것만 (deprecated 제외), category별로 묶어서
+MAX_DECISIONS="${DECISION_INJECT_MAX:-200}"
+_shown=0
 BODY=$(
   for CAT in architecture stack convention process scope; do
     [ -d "$DECISION_DIR/$CAT" ] || continue
@@ -28,6 +30,9 @@ BODY=$(
     for F in "$DECISION_DIR/$CAT"/*.md; do
       [ -f "$F" ] || continue
       grep -qE '^status: *(stable|draft)' "$F" || continue
+      # 상한 없이 늘면 SessionStart timeout(10s)에 걸려 주입이 통째로 사라진다
+      _shown=$((_shown + 1))
+      [ "$_shown" -gt "$MAX_DECISIONS" ] && continue
       if [ $FIRST -eq 1 ]; then
         printf '\n## %s\n' "$CAT"
         FIRST=0

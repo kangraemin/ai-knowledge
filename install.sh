@@ -15,9 +15,11 @@ _lock_i=0
 while ! mkdir "$LOCK_DIR" 2>/dev/null; do
   _lock_i=$((_lock_i + 1))
   if [ "$_lock_i" -gt 100 ]; then
+    # 죽은 잠금 회수. `mkdir || true; break` 로 하면 대기하던 프로세스가
+    # 전원 동시에 break 해 임계구역에 같이 들어간다 — 회수에 성공한
+    # 하나만 진행하고 나머지는 계속 경쟁시킨다.
     rm -rf "$LOCK_DIR" 2>/dev/null
-    mkdir "$LOCK_DIR" 2>/dev/null || true
-    break
+    _lock_i=0
   fi
   sleep 0.1
 done

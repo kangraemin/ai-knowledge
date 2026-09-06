@@ -93,8 +93,9 @@ import sys, re
 p = sys.argv[1]
 s = open(p).read()
 # "## Library 시스템" 부터 다음 같은 레벨 헤딩(또는 EOF) 직전까지 삭제
-s2 = re.sub(r"\n## Library 시스템\n.*?(?=\n## (?!Library)|\n# ---|\Z)", "\n", s, flags=re.S)
+s2 = re.sub(r"\n## Library 시스템\n.*?(?=\n##? (?!Library 시스템)|\n# ---|\Z)", "\n", s, flags=re.S)
 if s2 != s:
+    import shutil; shutil.copyfile(p, p + ".bak")   # 되돌릴 수 있게 남긴다
     open(p, "w").write(s2.rstrip("\n") + "\n")
 PYEOF
   echo "  ~/.claude/CLAUDE.md 의 Library 블록 제거"

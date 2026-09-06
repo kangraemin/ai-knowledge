@@ -529,7 +529,11 @@ for event in ['SessionEnd', 'PostCompact', 'Stop', 'SessionStart']:
 @test "TC-59: save-check honors stop_hook_active re-entry guard" {
   install_with_input "1" > /dev/null 2>&1 || true
   local hook="$CLAUDE_DIR/hooks/library-save-check.sh"
-  [ -f "$hook" ] || skip "hook not installed"
+  # `|| skip` 은 훅이 아예 설치 안 되는 회귀를 초록불로 만든다. 실패시킨다.
+  if [ ! -f "$hook" ]; then
+    echo "hook not installed: $hook" >&2
+    return 1
+  fi
   local cdir="$CLAUDE_DIR/hooks/.counters"
   mkdir -p "$cdir"
   # 스로틀이 삼키지 않도록 카운터를 임계 직전으로 맞춘다.
@@ -545,7 +549,11 @@ for event in ['SessionEnd', 'PostCompact', 'Stop', 'SessionStart']:
 @test "TC-60: save-check throttles per session via counter file" {
   install_with_input "1" > /dev/null 2>&1 || true
   local hook="$CLAUDE_DIR/hooks/library-save-check.sh"
-  [ -f "$hook" ] || skip "hook not installed"
+  # `|| skip` 은 훅이 아예 설치 안 되는 회귀를 초록불로 만든다. 실패시킨다.
+  if [ ! -f "$hook" ]; then
+    echo "hook not installed: $hook" >&2
+    return 1
+  fi
   local input='{"stop_hook_active": false, "session_id": "throttle_xyz"}'
   # transcript_path 가 없으면 조용히 통과하는 게 정상 (백그라운드 리뷰 위임 방식)
   local out
@@ -562,7 +570,11 @@ for event in ['SessionEnd', 'PostCompact', 'Stop', 'SessionStart']:
 @test "TC-61: save-check counter lives under .counters/ and increments" {
   install_with_input "1" > /dev/null 2>&1 || true
   local hook="$CLAUDE_DIR/hooks/library-save-check.sh"
-  [ -f "$hook" ] || skip "hook not installed"
+  # `|| skip` 은 훅이 아예 설치 안 되는 회귀를 초록불로 만든다. 실패시킨다.
+  if [ ! -f "$hook" ]; then
+    echo "hook not installed: $hook" >&2
+    return 1
+  fi
   local cdir="$CLAUDE_DIR/hooks/.counters"
   local cf="$cdir/.library-check-counter-sess_mid"
   rm -rf "$cdir"
@@ -596,7 +608,11 @@ for event in ['SessionEnd', 'PostCompact', 'Stop', 'SessionStart']:
 @test "TC-64: library-allow allows paths inside the library" {
   install_with_input "1" > /dev/null 2>&1 || true
   local hook="$CLAUDE_DIR/hooks/library-allow.sh"
-  [ -f "$hook" ] || skip "hook not installed"
+  # `|| skip` 은 훅이 아예 설치 안 되는 회귀를 초록불로 만든다. 실패시킨다.
+  if [ ! -f "$hook" ]; then
+    echo "hook not installed: $hook" >&2
+    return 1
+  fi
   local out
   out=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/claude-library/library/a.md"}}' "$TEST_HOME" \
         | HOME="$TEST_HOME" bash "$hook")
@@ -606,7 +622,11 @@ for event in ['SessionEnd', 'PostCompact', 'Stop', 'SessionStart']:
 @test "TC-65: library-allow refuses traversal out of the library" {
   install_with_input "1" > /dev/null 2>&1 || true
   local hook="$CLAUDE_DIR/hooks/library-allow.sh"
-  [ -f "$hook" ] || skip "hook not installed"
+  # `|| skip` 은 훅이 아예 설치 안 되는 회귀를 초록불로 만든다. 실패시킨다.
+  if [ ! -f "$hook" ]; then
+    echo "hook not installed: $hook" >&2
+    return 1
+  fi
   local p out
   for p in "$TEST_HOME/claude-library/../.claude/settings.json" \
            "$TEST_HOME/claude-library/../../../../etc/passwd" \
@@ -623,7 +643,11 @@ for event in ['SessionEnd', 'PostCompact', 'Stop', 'SessionStart']:
 @test "TC-66: library-allow ignores non-edit tools" {
   install_with_input "1" > /dev/null 2>&1 || true
   local hook="$CLAUDE_DIR/hooks/library-allow.sh"
-  [ -f "$hook" ] || skip "hook not installed"
+  # `|| skip` 은 훅이 아예 설치 안 되는 회귀를 초록불로 만든다. 실패시킨다.
+  if [ ! -f "$hook" ]; then
+    echo "hook not installed: $hook" >&2
+    return 1
+  fi
   local out
   out=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/claude-library/library/a.md"}}' "$TEST_HOME" \
         | HOME="$TEST_HOME" bash "$hook")

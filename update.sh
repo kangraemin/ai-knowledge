@@ -81,6 +81,9 @@ done
 # ~/.claude/CLAUDE.md Library 섹션 업데이트
 GLOBAL_CLAUDE="$HOME/.claude/CLAUDE.md"
 RULES_SRC="$PACKAGE_DIR/templates/claude-rules.md"
+if [ -f "$GLOBAL_CLAUDE" ] && [ ! -f "$RULES_SRC" ]; then
+  echo "  경고: $RULES_SRC 없음 — CLAUDE.md 규칙 갱신 스킵 (다운로드 실패 가능)"
+fi
 if [ -f "$GLOBAL_CLAUDE" ] && [ -f "$RULES_SRC" ]; then
   python3 - "$GLOBAL_CLAUDE" "$RULES_SRC" << 'PYEOF'
 import sys, re, shutil
@@ -91,7 +94,7 @@ new_rules = "\n" + open(src).read().rstrip("\n") + "\n"
 # `.*` + DOTALL 은 파일 끝까지 먹는다. Library 섹션 뒤에 있던 사용자 규칙
 # (예: `# --- ai-bouncer-rule ---` 블록)이 통째로 삭제됐다 — 실제로 발생했다.
 # 다음 같은 레벨 헤딩 또는 `# ---` 센티널 직전에서 멈춘다.
-pattern = re.compile(r'\n## Library 시스템\n.*?(?=\n## (?!Library 시스템)|\n# ---|\Z)', re.DOTALL)
+pattern = re.compile(r'\n## Library 시스템\n.*?(?=\n##? (?!Library 시스템)|\n# ---|\Z)', re.DOTALL)
 if not pattern.search(content):
     print("·  CLAUDE.md 에 Library 섹션 없음 — 건너뜀")
 else:
@@ -107,6 +110,16 @@ fi
 
 # --- permissions: library 경로 허용 (누락 시 보충) ---
 SETTINGS="$HOME/.claude/settings.json"
+
+# SessionStart 훅이 자동 실행하므로 세션 여러 개를 동시에 열면 그대로 경합한다.
+LOCK_DIR="$(dirname "$SETTINGS")/.settings.lock"
+_lock_i=0
+while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+  _lock_i=$((_lock_i + 1))
+  [ "$_lock_i" -gt 150 ] && break
+  sleep 0.1
+done
+trap 'rm -rf "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
 if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
   if jq -e '.permissions.allow // [] | map(select(test("claude-library"))) | length > 0' "$SETTINGS" >/dev/null 2>&1; then
     skip "library 경로 권한 이미 존재"
