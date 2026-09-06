@@ -10,6 +10,7 @@ echo "learnings-for-claude 제거 중..."
 
 # 1. 프로젝트 CLAUDE.md에서 규칙 제거
 CLAUDE_MD="$TARGET/CLAUDE.md"
+GLOBAL_CLAUDE_MD="$HOME/.claude/CLAUDE.md"
 MARKER="## Library 시스템"
 
 if [ -f "$CLAUDE_MD" ] && grep -qF "$MARKER" "$CLAUDE_MD"; then
@@ -84,3 +85,18 @@ if [ "$_lfc_installed" = "1" ]; then
     fi
   fi
 fi
+
+# 4. ~/.claude/CLAUDE.md 의 Library 블록 제거 (install 은 여기에 쓴다)
+if [ -f "$GLOBAL_CLAUDE_MD" ] && grep -q "^## Library 시스템" "$GLOBAL_CLAUDE_MD"; then
+  python3 - "$GLOBAL_CLAUDE_MD" <<'PYEOF'
+import sys, re
+p = sys.argv[1]
+s = open(p).read()
+# "## Library 시스템" 부터 다음 같은 레벨 헤딩(또는 EOF) 직전까지 삭제
+s2 = re.sub(r"\n## Library 시스템\n.*?(?=\n## (?!Library)|\n# ---|\Z)", "\n", s, flags=re.S)
+if s2 != s:
+    open(p, "w").write(s2.rstrip("\n") + "\n")
+PYEOF
+  echo "  ~/.claude/CLAUDE.md 의 Library 블록 제거"
+fi
+rm -f "$HOME/.claude/hooks/.learnings-version"

@@ -416,10 +416,15 @@ assert mcp.get('command') == 'uvx', mcp
   ! grep -qF ".claude-library/" "$CLAUDE_DIR/.gitignore" 2>/dev/null
 }
 
-@test "TC-50: IS_GIT=true git_choice=1 - adds claude-library to .gitignore" {
+@test "TC-50: library outside repo needs no .gitignore entry (stale one removed)" {
   git -C "$CLAUDE_DIR" init -q 2>/dev/null
-  install_with_input "1"
-  grep -qE "claude-library" "$CLAUDE_DIR/.gitignore" || skip "git 관리 방식 프롬프트 분기 미도달"
+  # 이전 설치가 남긴 옛 항목
+  echo ".claude-library/" > "$CLAUDE_DIR/.gitignore"
+  local out
+  out=$(install_with_input "1")
+  # 라이브러리는 $HOME/claude-library — 레포($CLAUDE_DIR) 밖이라 무시 대상이 아니다
+  ! grep -qF ".claude-library/" "$CLAUDE_DIR/.gitignore"
+  echo "$out" | grep -q "gitignore"
 }
 
 @test "TC-51: IS_GIT=true git_choice=2 - does not add to .gitignore" {
@@ -492,12 +497,20 @@ for event in ['SessionEnd', 'PostCompact', 'Stop', 'SessionStart']:
 
 # ─── 12. library-save-check.sh behavior ─────────────────────────
 
-@test "TC-59: save-check exits silently when stop_hook_active=true" {
-  install_with_input "1"
-  local input='{"stop_hook_active": true, "session_id": "test123"}'
+@test "TC-59: save-check honors stop_hook_active re-entry guard" {
+  install_with_input "1" > /dev/null 2>&1 || true
+  local hook="$CLAUDE_DIR/hooks/library-save-check.sh"
+  [ -f "$hook" ] || skip "hook not installed"
+  local cdir="$CLAUDE_DIR/hooks/.counters"
+  mkdir -p "$cdir"
+  # 스로틀이 삼키지 않도록 카운터를 임계 직전으로 맞춘다.
+  # 그래야 이 테스트가 "가드"만을 검증한다 (가드를 지우면 빨간불이 된다).
+  echo 19 > "$cdir/.library-check-counter-guard_sess"
   local out
-  out=$(echo "$input" | bash "$CLAUDE_DIR/hooks/library-save-check.sh" 2>&1)
+  out=$(echo '{"stop_hook_active": true, "session_id": "guard_sess"}' | bash "$hook")
   [ -z "$out" ]
+  # 가드가 작동했으면 카운터는 증가하지 않는다 (조기 exit)
+  [ "$(cat "$cdir/.library-check-counter-guard_sess")" = "19" ]
 }
 
 @test "TC-60: save-check throttles per session via counter file" {
@@ -517,13 +530,19 @@ for event in ['SessionEnd', 'PostCompact', 'Stop', 'SessionStart']:
   [ "$(cat "$cf")" = "2" ]
 }
 
-@test "TC-61: save-check exits silently when counter is 1-9" {
-  install_with_input "1"
-  echo "5" > "$CLAUDE_DIR/hooks/.library-check-counter-sess_mid"
-  local input='{"stop_hook_active": false, "session_id": "sess_mid"}'
-  local out
-  out=$(echo "$input" | bash "$CLAUDE_DIR/hooks/library-save-check.sh" 2>&1)
-  [ -z "$out" ]
+@test "TC-61: save-check counter lives under .counters/ and increments" {
+  install_with_input "1" > /dev/null 2>&1 || true
+  local hook="$CLAUDE_DIR/hooks/library-save-check.sh"
+  [ -f "$hook" ] || skip "hook not installed"
+  local cdir="$CLAUDE_DIR/hooks/.counters"
+  local cf="$cdir/.library-check-counter-sess_mid"
+  rm -rf "$cdir"
+  echo '{"stop_hook_active": false, "session_id": "sess_mid"}' | bash "$hook" >/dev/null
+  # 훅 디렉터리가 없어도 mkdir -p 로 만들어야 한다
+  [ -f "$cf" ]
+  [ "$(cat "$cf")" = "1" ]
+  # 옛 위치에는 만들지 않는다
+  [ ! -f "$CLAUDE_DIR/hooks/.library-check-counter-sess_mid" ]
 }
 
 # ─── 13. library-sync.sh behavior ────────────────────────────────

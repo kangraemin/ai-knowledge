@@ -177,10 +177,25 @@ fi
 
 if [ "$NEED_GITIGNORE" = true ]; then
   GITIGNORE="$CLAUDE_DIR/.gitignore"
-  if ! grep -qF ".claude-library/" "$GITIGNORE" 2>/dev/null; then
-    echo ".claude-library/" >> "$GITIGNORE"
-    echo "  $(msg '.gitignore에 .claude-library/ 추가' 'Added .claude-library/ to .gitignore')"
-  fi
+  # 라이브러리가 $CLAUDE_DIR 밖(~/claude-library)으로 이전됐다.
+  # 레포 밖 경로는 .gitignore 로 무시할 대상이 아니다 — 옛 항목만 정리한다.
+  case "$LIB_DIR/" in
+    "$CLAUDE_DIR"/*)
+      LIB_REL="${LIB_DIR#$CLAUDE_DIR/}"
+      if ! grep -qF "$LIB_REL/" "$GITIGNORE" 2>/dev/null; then
+        echo "$LIB_REL/" >> "$GITIGNORE"
+        echo "  $(msg ".gitignore에 $LIB_REL/ 추가" "Added $LIB_REL/ to .gitignore")"
+      fi
+      ;;
+    *)
+      # 옛 위치 항목이 남아 있으면 제거 (이제 존재하지 않는 경로)
+      if [ -f "$GITIGNORE" ] && grep -qF ".claude-library/" "$GITIGNORE" 2>/dev/null; then
+        grep -vF ".claude-library/" "$GITIGNORE" > "$GITIGNORE.tmp" && mv "$GITIGNORE.tmp" "$GITIGNORE"
+        echo "  $(msg '.gitignore 의 옛 .claude-library/ 항목 제거' 'Removed stale .claude-library/ from .gitignore')"
+      fi
+      echo "  $(msg "라이브러리가 $LIB_DIR (레포 밖) 라 .gitignore 항목 불필요" "Library at $LIB_DIR is outside the repo; no .gitignore entry needed")"
+      ;;
+  esac
 fi
 
 if [ "$NEED_REPO" = true ]; then
@@ -466,7 +481,7 @@ done
 
 if command -v jq >/dev/null 2>&1; then
   # SessionStart: 현재 레포의 active 결정사항 주입
-  if ! grep -qF "decision-inject.sh" "$SETTINGS" 2>/dev/null; then
+  if [ -f "$CLAUDE_DIR/hooks/decision-inject.sh" ] && ! grep -qF "decision-inject.sh" "$SETTINGS" 2>/dev/null; then
     jq --argjson hook "{\"hooks\":[{\"type\":\"command\",\"command\":\"$CLAUDE_DIR/hooks/decision-inject.sh\",\"timeout\":10}]}" \
       '.hooks.SessionStart = (.hooks.SessionStart // []) + [$hook]' \
       "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
@@ -474,7 +489,7 @@ if command -v jq >/dev/null 2>&1; then
   fi
 
   # PostToolUse: library/decision 쓰기 활동 로그
-  if ! grep -qF "library-activity-log.sh" "$SETTINGS" 2>/dev/null; then
+  if [ -f "$CLAUDE_DIR/hooks/library-activity-log.sh" ] && ! grep -qF "library-activity-log.sh" "$SETTINGS" 2>/dev/null; then
     jq --argjson hook "{\"matcher\":\"Write|Edit|MultiEdit\",\"hooks\":[{\"type\":\"command\",\"command\":\"$CLAUDE_DIR/hooks/library-activity-log.sh\",\"timeout\":10}]}" \
       '.hooks.PostToolUse = (.hooks.PostToolUse // []) + [$hook]' \
       "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
