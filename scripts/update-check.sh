@@ -88,23 +88,9 @@ fi
 
 [ "$LATEST_SHA" = "$INSTALLED_SHA" ] && exit 0
 
-# bootstrap: 자기 자신 먼저 업데이트
-if [ "${_LEARNINGS_BOOTSTRAPPED:-}" != "1" ]; then
-  SELF_TMP=$(mktemp)
-  trap 'rm -f "$SELF_TMP"' EXIT
-  if curl -sfL --max-time 10 "$RAW_BASE/scripts/update-check.sh" -o "$SELF_TMP" 2>/dev/null && \
-     [ -s "$SELF_TMP" ] && bash -n "$SELF_TMP" 2>/dev/null; then
-    if ! cmp -s "$SELF_TMP" "$SELF" 2>/dev/null; then
-      mv "$SELF_TMP" "$SELF"
-      chmod +x "$SELF"
-      trap - EXIT
-      export _LEARNINGS_BOOTSTRAPPED=1
-      exec bash "$SELF" --force
-    fi
-  fi
-  rm -f "$SELF_TMP"
-  trap - EXIT
-fi
+# 자기 자신을 원격에서 받아 덮어쓰고 exec 하던 부트스트랩은 제거했다.
+# 검증이 `bash -n`(문법)뿐이라 레포가 한 번 털리면 설치된 전 사용자에게
+# 매 세션 임의 코드 실행이 된다. 자기갱신은 update.sh 의 copy_if_changed 가 한다.
 
 # git clone → update.sh 실행
 CLONE_DIR=$(mktemp -d)
@@ -112,6 +98,13 @@ trap 'rm -rf "$CLONE_DIR"' EXIT
 
 git clone --depth 1 "https://github.com/$REPO.git" "$CLONE_DIR/learnings-for-claude" -q 2>/dev/null || exit 0
 
-bash "$CLONE_DIR/learnings-for-claude/update.sh" || exit 0
+if [ "${LEARNINGS_AUTO_UPDATE:-0}" = "1" ] || [ "${1:-}" = "--force" ]; then
+  bash "$CLONE_DIR/learnings-for-claude/update.sh" || exit 0
+else
+  # 동의 없이 사용자 파일을 건드리지 않는다. 알림만 하고 실행은 사용자가 고른다.
+  echo "learnings-for-claude 새 버전 있음: $INSTALLED_SHA → $LATEST_SHA"
+  echo "  적용: /update-learnings  (또는 LEARNINGS_AUTO_UPDATE=1 로 자동 적용)"
+  exit 0
+fi
 
 echo "learnings-for-claude $INSTALLED_SHA → $LATEST_SHA 업데이트 완료"

@@ -23,6 +23,7 @@ DECISION_DIR="$HOME/claude-library/decisions/$REPO"
 # OKF §5.4 status 가 stable/draft 인 것만 (deprecated 제외), category별로 묶어서
 MAX_DECISIONS="${DECISION_INJECT_MAX:-200}"
 _shown=0
+_total=0
 BODY=$(
   for CAT in architecture stack convention process scope; do
     [ -d "$DECISION_DIR/$CAT" ] || continue
@@ -31,6 +32,7 @@ BODY=$(
       [ -f "$F" ] || continue
       grep -qE '^status: *(stable|draft)' "$F" || continue
       # 상한 없이 늘면 SessionStart timeout(10s)에 걸려 주입이 통째로 사라진다
+      _total=$((_total + 1))
       _shown=$((_shown + 1))
       [ "$_shown" -gt "$MAX_DECISIONS" ] && continue
       if [ $FIRST -eq 1 ]; then
@@ -49,8 +51,13 @@ BODY=$(
 [ -n "$BODY" ] || exit 0
 
 COUNT=$(printf '%s' "$BODY" | grep -c '^- \*\*')
+TOTAL=$(find "$DECISION_DIR" -name '*.md' ! -name index.md -exec grep -lE '^status: *(stable|draft)' {} + 2>/dev/null | wc -l | tr -d ' ')
+TRUNC_NOTE=""
+if [ "${TOTAL:-0}" -gt "$COUNT" ]; then
+  TRUNC_NOTE=" (전체 ${TOTAL}건 중 ${COUNT}건만 주입 — 나머지는 decision_list(\"$REPO\") 로 확인하라)"
+fi
 
-CONTEXT="# 이 레포($REPO)의 확정된 결정사항 ${COUNT}건
+CONTEXT="# 이 레포($REPO)의 확정된 결정사항 ${COUNT}건${TRUNC_NOTE}
 
 아래는 이 프로젝트에서 **이미 결정된 사항**이다. 지식이 아니라 결정이다.
 새 제안을 하기 전에 여기서 이미 정해졌는지 확인하고, 뒤집으려면 이유를 먼저 밝혀라.

@@ -678,3 +678,43 @@ allow = d.get('permissions', {}).get('allow', [])
 assert any('claude-library' in a for a in allow), allow
 "
 }
+
+# ─── PreToolUse / PostToolUse 등록 (지금까지 어느 케이스도 검증 안 함) ───
+
+@test "TC-69: registers library-allow.sh as a PreToolUse hook" {
+  install_with_input "1" > /dev/null 2>&1 || true
+  python3 -c "
+import json
+d = json.load(open('$SETTINGS'))
+cmds = [h['command'] for m in d.get('hooks', {}).get('PreToolUse', []) for h in m.get('hooks', [])]
+assert any('library-allow.sh' in c for c in cmds), cmds
+"
+}
+
+@test "TC-70: registers library-activity-log.sh as a PostToolUse hook with edit matcher" {
+  install_with_input "1" > /dev/null 2>&1 || true
+  python3 -c "
+import json
+d = json.load(open('$SETTINGS'))
+found = False
+for m in d.get('hooks', {}).get('PostToolUse', []):
+    for h in m.get('hooks', []):
+        if 'library-activity-log.sh' in h['command']:
+            found = True
+            assert 'Write' in m.get('matcher', ''), m
+assert found, d.get('hooks', {}).get('PostToolUse')
+"
+}
+
+@test "TC-71: no duplicate PreToolUse/PostToolUse registration on reinstall" {
+  install_with_input "1" > /dev/null 2>&1 || true
+  install_with_input "1" > /dev/null 2>&1 || true
+  python3 -c "
+import json, collections
+d = json.load(open('$SETTINGS'))
+for ev in ('PreToolUse', 'PostToolUse'):
+    c = collections.Counter(h['command'] for m in d.get('hooks', {}).get(ev, []) for h in m.get('hooks', []))
+    dupes = [k for k, n in c.items() if n > 1]
+    assert not dupes, (ev, dupes)
+"
+}

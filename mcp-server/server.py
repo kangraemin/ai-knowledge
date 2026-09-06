@@ -69,6 +69,10 @@ def _build_index() -> list[dict]:
     for md_file in sorted(library_dir.rglob("*.md")):
         if md_file.name in ("index.md", "log.md", "_template.md"):
             continue
+        # 라이브러리 안의 심볼릭 링크가 밖을 가리킬 수 있다.
+        # read 툴만 막고 인덱서를 안 막으면 검색 미리보기로 본문이 샌다.
+        if _safe_path(md_file.relative_to(LIBRARY_ROOT)) is None:
+            continue
 
         text = _read_file(md_file)
         meta = _parse_frontmatter(text)
@@ -284,6 +288,8 @@ def _decision_entries(repo: str = "") -> list[dict]:
         rel = md.relative_to(LIBRARY_ROOT)
         parts = rel.parts  # ('decisions', repo, category, file)
         if len(parts) != 4 or md.name in ("index.md", "log.md"):
+            continue
+        if _safe_path(rel) is None:
             continue
         if repo and parts[1] != repo:
             continue

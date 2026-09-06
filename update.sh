@@ -59,8 +59,28 @@ copy_if_changed "$PACKAGE_DIR/hooks/code-lesson-check.sh" "$HOOK_DIR/code-lesson
 copy_if_changed "$PACKAGE_DIR/hooks/library-allow.sh" "$HOOK_DIR/library-allow.sh" "library-allow.sh (pretooluse hook)"
 copy_if_changed "$PACKAGE_DIR/hooks/decision-inject.sh" "$HOOK_DIR/decision-inject.sh" "decision-inject.sh (sessionstart hook)"
 copy_if_changed "$PACKAGE_DIR/hooks/library-activity-log.sh" "$HOOK_DIR/library-activity-log.sh" "library-activity-log.sh (posttooluse hook)"
-copy_if_changed "$PACKAGE_DIR/GUIDE.md" "$LIB_DIR/GUIDE.md" "GUIDE.md"
-copy_if_changed "$PACKAGE_DIR/TAXONOMY.md" "$LIB_DIR/TAXONOMY.md" "TAXONOMY.md"
+# GUIDE.md / TAXONOMY.md 는 사용자가 계속 편집하는 파일이다
+# (CLAUDE.md 가 "TAXONOMY.md 에 먼저 추가 후 저장"을 지시한다).
+# 무조건 덮어쓰면 분류체계가 통째로 사라진다 — 실제로 발생했다.
+# 사용자가 손댄 흔적이 있으면 건드리지 않고 새 버전을 옆에 둔다.
+preserve_user_doc() {
+  local src="$1" dst="$2" name="$3"
+  [ -f "$src" ] || return 0
+  if [ ! -f "$dst" ]; then
+    cp "$src" "$dst"; echo "  $name 생성"; return 0
+  fi
+  cmp -s "$src" "$dst" && return 0
+  # 설치 시점 원본과 같으면(=사용자가 안 건드림) 안전하게 갱신
+  if [ -f "$dst.orig" ] && cmp -s "$dst.orig" "$dst"; then
+    cp "$dst" "$dst.bak"; cp "$src" "$dst"; cp "$src" "$dst.orig"
+    echo "  $name 업데이트 (백업: $name.bak)"
+  else
+    cp "$src" "$dst.new"
+    echo "  $name 은 수정본이라 유지 — 새 버전은 $name.new 로 저장했다"
+  fi
+}
+preserve_user_doc "$PACKAGE_DIR/GUIDE.md" "$LIB_DIR/GUIDE.md" "GUIDE.md"
+preserve_user_doc "$PACKAGE_DIR/TAXONOMY.md" "$LIB_DIR/TAXONOMY.md" "TAXONOMY.md"
 
 # Notion library 스크립트 (있으면 업데이트)
 SCRIPTS_DIR="$HOME/.claude/scripts"
@@ -94,7 +114,7 @@ new_rules = "\n" + open(src).read().rstrip("\n") + "\n"
 # `.*` + DOTALL 은 파일 끝까지 먹는다. Library 섹션 뒤에 있던 사용자 규칙
 # (예: `# --- ai-bouncer-rule ---` 블록)이 통째로 삭제됐다 — 실제로 발생했다.
 # 다음 같은 레벨 헤딩 또는 `# ---` 센티널 직전에서 멈춘다.
-pattern = re.compile(r'\n## Library 시스템\n.*?(?=\n##? (?!Library 시스템)|\n# ---|\Z)', re.DOTALL)
+pattern = re.compile(r'\n## Library 시스템\n.*?(?=\n#{1,3} (?!Library 시스템)|\n# ---|\Z)', re.DOTALL)
 if not pattern.search(content):
     print("·  CLAUDE.md 에 Library 섹션 없음 — 건너뜀")
 else:

@@ -175,6 +175,11 @@ if [ ! -f "$LIB_DIR/library/_template.md" ]; then
 EOF
 fi
 
+# 활동 로그는 로컬 기록이다. 없으면 SessionEnd 마다 커밋·푸시된다.
+if [ ! -f "$LIB_DIR/.gitignore" ]; then
+  printf '# 활동 로그는 로컬 기록 — 매 세션 커밋 대상이 아니다\n.activity/\n' > "$LIB_DIR/.gitignore"
+fi
+
 echo "  $(msg '~/claude-library/ 생성' '~/claude-library/ created')"
 
 # --- git 설정 ---
@@ -286,7 +291,7 @@ start_idx = content.find('\n' + START)
 if start_idx != -1:
     rest = content[start_idx + 1:]
     # 다음 섹션(## 또는 # ---) 직전까지만 교체
-    end_match = re.search(r'\n(##? |# ---)', rest)
+    end_match = re.search(r'\n(#{1,3} |# ---)', rest)
     if end_match:
         end_idx = start_idx + 1 + end_match.start()
         content = content[:start_idx + 1] + new_block + '\n\n' + content[end_idx:]
@@ -301,8 +306,12 @@ import sys, re
 import os
 target, src = sys.argv[1], sys.argv[2]
 # 신규 설치에는 CLAUDE.md 가 아직 없다. 없으면 새로 만든다 (예전엔 여기서 크래시)
+import shutil
 os.makedirs(os.path.dirname(target) or ".", exist_ok=True)   # 신규 설치엔 .claude/ 자체가 없다
-content = open(target).read() if os.path.exists(target) else ""
+_existed = os.path.exists(target)
+content = open(target).read() if _existed else ""
+if _existed:
+    shutil.copyfile(target, target + ".bak")   # 되돌릴 수 있게 남긴다
 new_block = open(src).read()
 
 # ai-bouncer 섹션 앞에 삽입, 없으면 파일 끝에 추가
@@ -826,7 +835,7 @@ if [ -n "$project_root" ]; then
 
     # CLAUDE.md 목차에 projects 추가
     if grep -qF "### 목차" "$GLOBAL_CLAUDE" 2>/dev/null && ! grep -qF "projects:" "$GLOBAL_CLAUDE" 2>/dev/null; then
-      sed -i '' '/^- projects:/d' "$GLOBAL_CLAUDE" 2>/dev/null
+      python3 -c "import sys,re;p=sys.argv[1];s=open(p).read();open(p,'w').write(re.sub(r'^- projects:.*\n','',s,flags=re.M))" "$GLOBAL_CLAUDE" 2>/dev/null
       python3 - "$GLOBAL_CLAUDE" << 'PYEOF'
 import sys
 f = sys.argv[1]

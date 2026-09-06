@@ -14,14 +14,18 @@ GLOBAL_CLAUDE_MD="$HOME/.claude/CLAUDE.md"
 MARKER="## Library 시스템"
 
 if [ -f "$CLAUDE_MD" ] && grep -qF "$MARKER" "$CLAUDE_MD"; then
-  awk -v marker="$MARKER" '
-    $0 == marker { found=1; next }
-    found && /^## / { found=0 }
-    !found
-  ' "$CLAUDE_MD" > "$CLAUDE_MD.tmp"
-  sed -i '' -e '${/^[[:space:]]*$/d;}' "$CLAUDE_MD.tmp"
-  mv "$CLAUDE_MD.tmp" "$CLAUDE_MD"
-  echo "  $TARGET/CLAUDE.md 규칙 제거"
+  python3 - "$CLAUDE_MD" <<'PYEOF'
+import sys, re, shutil
+p = sys.argv[1]
+s = open(p).read()
+# 종료조건에 레벨1/3 헤딩과 `# ---` 센티널을 모두 포함한다.
+# `^## ` 만 보면 그 뒤 사용자 규칙이 통째로 사라진다 — 실제로 발생했다.
+s2 = re.sub(r"\n## Library 시스템\n.*?(?=\n#{1,3} (?!Library 시스템)|\n# ---|\Z)", "\n", s, flags=re.S)
+if s2 != s:
+    shutil.copyfile(p, p + ".bak")
+    open(p, "w").write(s2.rstrip("\n") + "\n")
+PYEOF
+  echo "  $TARGET/CLAUDE.md 규칙 제거 (백업: CLAUDE.md.bak)"
 fi
 
 # 2. 훅 제거 여부 확인
@@ -93,7 +97,7 @@ import sys, re
 p = sys.argv[1]
 s = open(p).read()
 # "## Library 시스템" 부터 다음 같은 레벨 헤딩(또는 EOF) 직전까지 삭제
-s2 = re.sub(r"\n## Library 시스템\n.*?(?=\n##? (?!Library 시스템)|\n# ---|\Z)", "\n", s, flags=re.S)
+s2 = re.sub(r"\n## Library 시스템\n.*?(?=\n#{1,3} (?!Library 시스템)|\n# ---|\Z)", "\n", s, flags=re.S)
 if s2 != s:
     import shutil; shutil.copyfile(p, p + ".bak")   # 되돌릴 수 있게 남긴다
     open(p, "w").write(s2.rstrip("\n") + "\n")
