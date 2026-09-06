@@ -117,10 +117,19 @@ for d in sorted(set([ROOT] + [p.parent for p in (ROOT / "library").rglob("*.md")
 print("index.md 생성:", count)
 
 # --- §9 log.md : git 이력에서 생성 ---
-out = subprocess.run(["git", "-C", str(ROOT), "log", "--format=@%aI|%s", "--name-status",
-                      "--diff-filter=AM", "--", "library", "decisions"],
-                     capture_output=True, text=True).stdout
+_git = subprocess.run(["git", "-C", str(ROOT), "log", "--format=@%aI|%s", "--name-status",
+                       "--diff-filter=AM", "--", "library", "decisions"],
+                      capture_output=True, text=True)
+if _git.returncode != 0:
+    # .git 이 없거나 git 이 실패하면 이력을 만들 수 없다.
+    # 빈 결과로 log.md 를 덮어쓰면 기존 이력이 통째로 사라진다 — 건드리지 않는다.
+    print("log.md 스킵: git 이력 조회 실패 —", (_git.stderr or "").strip()[:100])
+    out = None
+else:
+    out = _git.stdout
 days = collections.OrderedDict()
+if out is None:
+    out = ""
 cur = None
 for line in out.splitlines():
     if line.startswith("@"):
@@ -146,7 +155,8 @@ for day, items in list(days.items())[:120]:
             # 이후 이동·삭제된 문서 — 이력은 남기되 깨진 링크는 만들지 않는다
             log.append(f"* **{kind}**: {title} `{f}`")
     log.append("")
-(ROOT / "log.md").write_text("\n".join(log), encoding="utf-8")
+if _git.returncode == 0:
+    (ROOT / "log.md").write_text("\n".join(log), encoding="utf-8")
 print("log.md 생성:", len(days), "일자")
 
 # --- 루트 문서 프론트매터 (OKF §11 conformance) ---

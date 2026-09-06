@@ -190,8 +190,15 @@ if [ "$NEED_GITIGNORE" = true ]; then
     *)
       # 옛 위치 항목이 남아 있으면 제거 (이제 존재하지 않는 경로)
       if [ -f "$GITIGNORE" ] && grep -qF ".claude-library/" "$GITIGNORE" 2>/dev/null; then
-        grep -vF ".claude-library/" "$GITIGNORE" > "$GITIGNORE.tmp" && mv "$GITIGNORE.tmp" "$GITIGNORE"
-        echo "  $(msg '.gitignore 의 옛 .claude-library/ 항목 제거' 'Removed stale .claude-library/ from .gitignore')"
+        # grep -v 는 남는 줄이 0이면 exit 1 이라 `&& mv` 가 실행되지 않는다.
+        # 그러면 원본이 안 바뀐 채 "제거함" 메시지만 나가고 .tmp 가 고아로 남는다.
+        grep -vF ".claude-library/" "$GITIGNORE" > "$GITIGNORE.tmp" || true
+        if mv "$GITIGNORE.tmp" "$GITIGNORE"; then
+          echo "  $(msg '.gitignore 의 옛 .claude-library/ 항목 제거' 'Removed stale .claude-library/ from .gitignore')"
+        else
+          rm -f "$GITIGNORE.tmp"
+          echo "  $(msg '경고: .gitignore 정리 실패' 'warning: failed to clean .gitignore')"
+        fi
       fi
       echo "  $(msg "라이브러리가 $LIB_DIR (레포 밖) 라 .gitignore 항목 불필요" "Library at $LIB_DIR is outside the repo; no .gitignore entry needed")"
       ;;
@@ -310,7 +317,7 @@ else
   jq --argjson hook "$HOOK_JSON" '
     .hooks.SessionEnd = (.hooks.SessionEnd // []) + [$hook] |
     .hooks.PostCompact = (.hooks.PostCompact // []) + [$hook]
-  ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+  ' "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
 
   echo "  $(msg 'SessionEnd / PostCompact 훅 등록' 'SessionEnd / PostCompact hooks registered')"
 fi
@@ -329,7 +336,7 @@ else
   SAVE_CHECK_JSON="{\"hooks\":[{\"type\":\"command\",\"command\":\"$SAVE_CHECK_DEST\",\"timeout\":10}]}"
   jq --argjson hook "$SAVE_CHECK_JSON" '
     .hooks.Stop = (.hooks.Stop // []) + [$hook]
-  ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+  ' "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
 
   echo "  $(msg 'Stop 훅 등록: library-save-check.sh' 'Stop hook registered: library-save-check.sh')"
 fi
@@ -348,7 +355,7 @@ else
   LIBRARY_ALLOW_JSON="{\"matcher\":\"Write|Edit|MultiEdit\",\"hooks\":[{\"type\":\"command\",\"command\":\"$LIBRARY_ALLOW_DEST\",\"timeout\":3}]}"
   jq --argjson hook "$LIBRARY_ALLOW_JSON" '
     .hooks.PreToolUse = (.hooks.PreToolUse // []) + [$hook]
-  ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+  ' "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
 
   echo "  $(msg 'PreToolUse 훅 등록: library-allow.sh' 'PreToolUse hook registered: library-allow.sh')"
 fi
@@ -439,7 +446,7 @@ EOF
     CHECK_HOOK_JSON="{\"hooks\":[{\"type\":\"command\",\"command\":\"$UPDATE_CHECK_DEST\",\"timeout\":15,\"async\":true}]}"
     jq --argjson hook "$CHECK_HOOK_JSON" \
       '.hooks.SessionStart = (.hooks.SessionStart // []) + [$hook]' \
-      "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+      "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
   fi
 
   # 초기 버전 기록
@@ -458,10 +465,10 @@ if [ -f "$CLAUDE_DIR/hooks/policy-inject.sh" ]; then
     if jq '.hooks.SessionStart |= ((. // [])
             | map(.hooks |= map(select((.command // "") | test("policy-inject.sh") | not)))
             | map(select((.hooks | length) > 0)))' \
-      "$SETTINGS" > "$SETTINGS.tmp"; then
-      mv "$SETTINGS.tmp" "$SETTINGS"
+      "$SETTINGS" > "$SETTINGS.tmp.$$"; then
+      mv "$SETTINGS.tmp.$$" "$SETTINGS"
     else
-      rm -f "$SETTINGS.tmp"
+      rm -f "$SETTINGS.tmp.$$"
     fi
   fi
   echo "  $(msg '구버전 policy-inject 훅 제거' 'removed legacy policy-inject hook')"
@@ -484,7 +491,7 @@ if command -v jq >/dev/null 2>&1; then
   if [ -f "$CLAUDE_DIR/hooks/decision-inject.sh" ] && ! grep -qF "decision-inject.sh" "$SETTINGS" 2>/dev/null; then
     jq --argjson hook "{\"hooks\":[{\"type\":\"command\",\"command\":\"$CLAUDE_DIR/hooks/decision-inject.sh\",\"timeout\":10}]}" \
       '.hooks.SessionStart = (.hooks.SessionStart // []) + [$hook]' \
-      "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+      "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
     echo "  $(msg 'SessionStart 결정사항 주입 훅 등록' 'SessionStart decision inject hook registered')"
   fi
 
@@ -492,7 +499,7 @@ if command -v jq >/dev/null 2>&1; then
   if [ -f "$CLAUDE_DIR/hooks/library-activity-log.sh" ] && ! grep -qF "library-activity-log.sh" "$SETTINGS" 2>/dev/null; then
     jq --argjson hook "{\"matcher\":\"Write|Edit|MultiEdit\",\"hooks\":[{\"type\":\"command\",\"command\":\"$CLAUDE_DIR/hooks/library-activity-log.sh\",\"timeout\":10}]}" \
       '.hooks.PostToolUse = (.hooks.PostToolUse // []) + [$hook]' \
-      "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+      "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
     echo "  $(msg 'PostToolUse 활동 로그 훅 등록' 'PostToolUse activity log hook registered')"
   fi
 fi
@@ -630,7 +637,7 @@ else
   CODE_LESSON_JSON="{\"hooks\":[{\"type\":\"command\",\"command\":\"$CODE_LESSON_DEST\",\"timeout\":10}]}"
   jq --argjson hook "$CODE_LESSON_JSON" '
     .hooks.Stop = (.hooks.Stop // []) + [$hook]
-  ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+  ' "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
 
   echo "  $(msg 'Stop 훅 등록: code-lesson-check.sh' 'Stop hook registered: code-lesson-check.sh')"
 fi
@@ -644,7 +651,7 @@ if command -v jq >/dev/null 2>&1; then
     "command": "uvx",
     "args": ["--with", "mcp<2", "claude-library-mcp@latest"],
     "env": {"LIBRARY_ROOT": ($home + "/claude-library")}
-  }' --arg home "$HOME" "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+  }' --arg home "$HOME" "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
   echo "  $(msg 'MCP 서버 등록: claude-library-mcp (uvx)' 'MCP server registered: claude-library-mcp (uvx)')"
 fi
 
@@ -663,7 +670,7 @@ if command -v jq >/dev/null 2>&1; then
       .permissions.additionalDirectories = ((.permissions.additionalDirectories // []) + [
         ($home + "/claude-library")
       ] | unique)
-    ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+    ' "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
     echo "  $(msg 'library 경로 Write/Edit 권한 등록 (절대경로 + additionalDirectories 포함)' 'Library path Write/Edit permissions registered (with absolute path + additionalDirectories)')"
   fi
 fi
@@ -736,7 +743,7 @@ if [ "$notion_lib" = "y" ] || [ "$notion_lib" = "Y" ]; then
     # settings.json에 LIBRARY_NOTION_DB_ID 추가
     if [ -n "$LIBRARY_NOTION_DB_ID" ] && command -v jq >/dev/null 2>&1; then
       jq --arg dbid "$LIBRARY_NOTION_DB_ID" '.env.LIBRARY_NOTION_DB_ID = $dbid' \
-        "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+        "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
       echo "  $(msg 'settings.json에 LIBRARY_NOTION_DB_ID 등록' 'LIBRARY_NOTION_DB_ID registered in settings.json')"
       echo ""
       echo "  $(msg 'Notion 연동 완료! Library 저장 시 Notion에도 자동 동기화됩니다.' 'Notion sync enabled! Library entries will auto-sync to Notion.')"

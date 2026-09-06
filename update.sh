@@ -112,7 +112,7 @@ if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
       .permissions.additionalDirectories = ((.permissions.additionalDirectories // []) + [
         ($home + "/claude-library")
       ] | unique)
-    ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+    ' "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
     ok "library 경로 Write/Edit 권한 추가 (절대경로 + additionalDirectories 포함)"
     UPDATED=$((UPDATED + 1))
   fi
@@ -127,7 +127,7 @@ if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
     LIBRARY_ALLOW_JSON="{\"matcher\":\"Write|Edit|MultiEdit\",\"hooks\":[{\"type\":\"command\",\"command\":\"$LIBRARY_ALLOW_DEST\",\"timeout\":3}]}"
     jq --argjson hook "$LIBRARY_ALLOW_JSON" '
       .hooks.PreToolUse = (.hooks.PreToolUse // []) + [$hook]
-    ' "$SETTINGS" > "$SETTINGS.tmp" && mv "$SETTINGS.tmp" "$SETTINGS"
+    ' "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
     ok "library-allow.sh PreToolUse 훅 등록"
     UPDATED=$((UPDATED + 1))
   fi

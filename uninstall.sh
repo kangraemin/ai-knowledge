@@ -34,8 +34,8 @@ if command -v jq &>/dev/null && grep -qF "library-sync" "$SETTINGS" 2>/dev/null;
     jq '
       .hooks.SessionEnd = [(.hooks.SessionEnd // [])[] | select((.hooks[0].command // "") | contains("library-sync") | not)] |
       .hooks.PostCompact = [(.hooks.PostCompact // [])[] | select((.hooks[0].command // "") | contains("library-sync") | not)]
-    ' "$SETTINGS" > "$SETTINGS.tmp"
-    mv "$SETTINGS.tmp" "$SETTINGS"
+    ' "$SETTINGS" > "$SETTINGS.tmp.$$"
+    mv "$SETTINGS.tmp.$$" "$SETTINGS"
     rm -f "$HOOK_DEST"
     echo "  훅 제거"
   else
@@ -67,8 +67,8 @@ if [ "$_lfc_installed" = "1" ]; then
       | .hooks.Stop        |= ((. // []) | strip("library-save-check.sh|code-lesson-check.sh"))
       | .hooks.SessionEnd   |= ((. // []) | strip("library-sync.sh"))
       | .hooks.PostCompact  |= ((. // []) | strip("library-sync.sh"))
-    ' "$SETTINGS" > "$SETTINGS.tmp"; then
-      mv "$SETTINGS.tmp" "$SETTINGS"
+    ' "$SETTINGS" > "$SETTINGS.tmp.$$"; then
+      mv "$SETTINGS.tmp.$$" "$SETTINGS"
       echo "  decision/활동로그 훅 제거"
     fi
     # MCP 서버 등록·권한·추가 디렉터리도 함께 해제
@@ -76,11 +76,11 @@ if [ "$_lfc_installed" = "1" ]; then
       del(.mcpServers["claude-library"])
       | .permissions.allow |= ((. // []) | map(select(test("claude-library") | not)))
       | .permissions.additionalDirectories |= ((. // []) | map(select(test("claude-library") | not)))
-    ' "$SETTINGS" > "$SETTINGS.tmp"; then
-      mv "$SETTINGS.tmp" "$SETTINGS"
+    ' "$SETTINGS" > "$SETTINGS.tmp.$$"; then
+      mv "$SETTINGS.tmp.$$" "$SETTINGS"
       echo "  MCP 등록·권한 해제"
     else
-      rm -f "$SETTINGS.tmp"
+      rm -f "$SETTINGS.tmp.$$"
       echo "  ⚠️ settings.json 갱신 실패 — 훅 등록이 남았을 수 있다"
     fi
   fi

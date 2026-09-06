@@ -36,6 +36,17 @@ install_with_input() {
   { echo "$input"; for _ in $(seq 1 20); do echo ""; done; } | bash "$patched" 2>&1
 }
 
+# 여러 프롬프트에 순서대로 답한다. 예: install_with_answers "1" "1"
+install_with_answers() {
+  local patched="$TEST_HOME/install_patched.sh"
+  local real_script_dir
+  real_script_dir="$(cd "$(dirname "$INSTALL_SH")" && pwd)"
+  sed 's|</dev/tty||g' "$INSTALL_SH" | \
+    sed "s|SCRIPT_DIR=.*|SCRIPT_DIR='$real_script_dir'|" > "$patched"
+  chmod +x "$patched"
+  { for a in "$@"; do echo "$a"; done; for _ in $(seq 1 20); do echo ""; done; } | bash "$patched" 2>&1
+}
+
 # ─── 1. Directory structure ───────────────────────────────────────
 
 @test "TC-01: creates .claude-library directory" {
@@ -416,15 +427,33 @@ assert mcp.get('command') == 'uvx', mcp
   ! grep -qF ".claude-library/" "$CLAUDE_DIR/.gitignore" 2>/dev/null
 }
 
-@test "TC-50: library outside repo needs no .gitignore entry (stale one removed)" {
+@test "TC-50: stale .claude-library/ entry is removed from .gitignore" {
   git -C "$CLAUDE_DIR" init -q 2>/dev/null
-  # 이전 설치가 남긴 옛 항목
+  # 옛 항목만 있는 경우 — grep -v 결과가 0줄이라 예전엔 제거에 실패했다
   echo ".claude-library/" > "$CLAUDE_DIR/.gitignore"
-  local out
-  out=$(install_with_input "1")
-  # 라이브러리는 $HOME/claude-library — 레포($CLAUDE_DIR) 밖이라 무시 대상이 아니다
-  ! grep -qF ".claude-library/" "$CLAUDE_DIR/.gitignore"
-  echo "$out" | grep -q "gitignore"
+  install_with_answers "1" "1" > /dev/null 2>&1 || true
+  # `! grep` 은 set -e 가 무시하므로 명시적으로 실패시킨다
+  if grep -qF ".claude-library/" "$CLAUDE_DIR/.gitignore"; then
+    echo "stale entry survived: $(cat "$CLAUDE_DIR/.gitignore")" >&2
+    return 1
+  fi
+  # .tmp 고아가 남지 않아야 한다
+  if [ -f "$CLAUDE_DIR/.gitignore.tmp" ]; then
+    echo ".gitignore.tmp orphan left behind" >&2
+    return 1
+  fi
+}
+
+@test "TC-50b: unrelated .gitignore entries survive cleanup" {
+  git -C "$CLAUDE_DIR" init -q 2>/dev/null
+  printf 'keepme/\n.claude-library/\nother.log\n' > "$CLAUDE_DIR/.gitignore"
+  install_with_answers "1" "1" > /dev/null 2>&1 || true
+  grep -qF "keepme/" "$CLAUDE_DIR/.gitignore"
+  grep -qF "other.log" "$CLAUDE_DIR/.gitignore"
+  if grep -qF ".claude-library/" "$CLAUDE_DIR/.gitignore"; then
+    echo "stale entry survived" >&2
+    return 1
+  fi
 }
 
 @test "TC-51: IS_GIT=true git_choice=2 - does not add to .gitignore" {
