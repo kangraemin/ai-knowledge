@@ -2,3 +2,9 @@ mcp-server/.venv/
 
 # ai-bouncer 런타임 상태
 .ai-bouncer/
+
+# ai-bouncer 작업 기록 (개인 세션 흔적)
+.ai-bouncer-tasks/
+
+# 로컬 전용 설정
+.claude/settings.local.json
