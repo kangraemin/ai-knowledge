@@ -108,8 +108,8 @@ def gen_index(d: pathlib.Path):
 
 count = 0
 for d in sorted(set([ROOT] + [p.parent for p in (ROOT / "library").rglob("*.md")]
-                    + [p.parent for p in (ROOT / "decisions").rglob("*.md")]
-                    + [ROOT / "library", ROOT / "decisions"])):
+                    + ([p.parent for p in (ROOT / "decisions").rglob("*.md")] if (ROOT / "decisions").exists() else [])
+                    + [d for d in (ROOT / "library", ROOT / "decisions") if d.exists()])):
     txt = gen_index(d)
     if txt:
         (d / "index.md").write_text(txt, encoding="utf-8")
@@ -120,10 +120,13 @@ print("index.md 생성:", count)
 _git = subprocess.run(["git", "-C", str(ROOT), "log", "--format=@%aI|%s", "--name-status",
                        "--diff-filter=AM", "--", "library", "decisions"],
                       capture_output=True, text=True)
-if _git.returncode != 0:
+_top = subprocess.run(["git", "-C", str(ROOT), "rev-parse", "--show-toplevel"],
+                      capture_output=True, text=True)
+_is_own_repo = _top.returncode == 0 and pathlib.Path(_top.stdout.strip() or "/x").resolve() == ROOT.resolve()
+if _git.returncode != 0 or not _is_own_repo:
     # .git 이 없거나 git 이 실패하면 이력을 만들 수 없다.
     # 빈 결과로 log.md 를 덮어쓰면 기존 이력이 통째로 사라진다 — 건드리지 않는다.
-    print("log.md 스킵: git 이력 조회 실패 —", (_git.stderr or "").strip()[:100])
+    print("log.md 스킵: 이 디렉터리가 자체 git repo 가 아니다 (상위 repo 의 이력으로 덮어쓰지 않는다)")
     out = None
 else:
     out = _git.stdout
@@ -155,7 +158,7 @@ for day, items in list(days.items())[:120]:
             # 이후 이동·삭제된 문서 — 이력은 남기되 깨진 링크는 만들지 않는다
             log.append(f"* **{kind}**: {title} `{f}`")
     log.append("")
-if _git.returncode == 0:
+if _git.returncode == 0 and _is_own_repo:
     (ROOT / "log.md").write_text("\n".join(log), encoding="utf-8")
 print("log.md 생성:", len(days), "일자")
 
@@ -192,7 +195,7 @@ for md in sorted((ROOT / "library").rglob("*.md")):
 
 # 생성 시각이 아니라 "가장 최근 문서의 시각" — 매 실행마다 diff 나는 걸 막는다
 _ats = []
-for _md in (ROOT/"library").rglob("*.md"):
+for _md in ((ROOT/"library").rglob("*.md") if (ROOT/"library").exists() else []):
     if _md.name in RESERVED: continue
     _g = fm_of(_md).get("generated", "")
     _m = re.search(r"at: *(\S+?)\s*}", _g) or re.search(r"at: *(\S+)", _g)

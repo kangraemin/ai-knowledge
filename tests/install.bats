@@ -590,3 +590,67 @@ for event in ['SessionEnd', 'PostCompact', 'Stop', 'SessionStart']:
   bash "$CLAUDE_DIR/hooks/library-sync.sh" 2>&1
   ! ls "$CLAUDE_DIR/hooks/.library-check-counter-"* 2>/dev/null
 }
+
+# ─── library-allow 권한 판정 (6회차 보안 수정 — 지금까지 커버리지 0) ───
+
+@test "TC-64: library-allow allows paths inside the library" {
+  install_with_input "1" > /dev/null 2>&1 || true
+  local hook="$CLAUDE_DIR/hooks/library-allow.sh"
+  [ -f "$hook" ] || skip "hook not installed"
+  local out
+  out=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s/claude-library/library/a.md"}}' "$TEST_HOME" \
+        | HOME="$TEST_HOME" bash "$hook")
+  echo "$out" | grep -q '"permissionDecision": *"allow"'
+}
+
+@test "TC-65: library-allow refuses traversal out of the library" {
+  install_with_input "1" > /dev/null 2>&1 || true
+  local hook="$CLAUDE_DIR/hooks/library-allow.sh"
+  [ -f "$hook" ] || skip "hook not installed"
+  local p out
+  for p in "$TEST_HOME/claude-library/../.claude/settings.json" \
+           "$TEST_HOME/claude-library/../../../../etc/passwd" \
+           "$TEST_HOME/claude-library-evil/x.md" \
+           "/etc/passwd"; do
+    out=$(printf '{"tool_name":"Write","tool_input":{"file_path":"%s"}}' "$p" | HOME="$TEST_HOME" bash "$hook")
+    if [ -n "$out" ]; then
+      echo "permission bypass for: $p -> $out" >&2
+      return 1
+    fi
+  done
+}
+
+@test "TC-66: library-allow ignores non-edit tools" {
+  install_with_input "1" > /dev/null 2>&1 || true
+  local hook="$CLAUDE_DIR/hooks/library-allow.sh"
+  [ -f "$hook" ] || skip "hook not installed"
+  local out
+  out=$(printf '{"tool_name":"Read","tool_input":{"file_path":"%s/claude-library/library/a.md"}}' "$TEST_HOME" \
+        | HOME="$TEST_HOME" bash "$hook")
+  [ -z "$out" ]
+}
+
+# ─── 깨진 settings.json 방어 (5회차 수정 — 커버리지 0) ───
+
+@test "TC-67: install aborts when settings.json is not valid JSON" {
+  echo '{ this is not valid json' > "$SETTINGS"
+  local out status
+  out=$(install_with_input "1") || status=$?
+  [ "${status:-0}" -ne 0 ]
+  echo "$out" | grep -q "유효한 JSON"
+  # 아무것도 설치하지 않아야 한다
+  [ ! -f "$CLAUDE_DIR/hooks/library-sync.sh" ]
+  grep -q "this is not valid json" "$SETTINGS"
+}
+
+# ─── permissions 등록 (커버리지 0) ───
+
+@test "TC-68: install registers claude-library write permissions" {
+  install_with_input "1" > /dev/null 2>&1 || true
+  python3 -c "
+import json
+d = json.load(open('$SETTINGS'))
+allow = d.get('permissions', {}).get('allow', [])
+assert any('claude-library' in a for a in allow), allow
+"
+}

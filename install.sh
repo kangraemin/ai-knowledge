@@ -6,6 +6,23 @@ CLAUDE_DIR="$HOME/.claude"
 LIB_DIR="$HOME/claude-library"
 SETTINGS="$CLAUDE_DIR/settings.json"
 
+# settings.json 은 read-modify-write 라 동시 실행 시 등록이 중복된다
+# (grep 가드 → jq → mv 사이에 다른 프로세스가 끼어든다).
+# mkdir 의 원자성을 이용한 잠금. 죽은 프로세스가 남긴 잠금은 회수한다.
+LOCK_DIR="$CLAUDE_DIR/.settings.lock"
+mkdir -p "$CLAUDE_DIR" 2>/dev/null || true
+_lock_i=0
+while ! mkdir "$LOCK_DIR" 2>/dev/null; do
+  _lock_i=$((_lock_i + 1))
+  if [ "$_lock_i" -gt 100 ]; then
+    rm -rf "$LOCK_DIR" 2>/dev/null
+    mkdir "$LOCK_DIR" 2>/dev/null || true
+    break
+  fi
+  sleep 0.1
+done
+trap 'rm -rf "$LOCK_DIR" 2>/dev/null' EXIT INT TERM
+
 # settings.json 이 깨져 있으면 모든 jq 등록이 조용히 실패한다.
 # 그런데도 "등록" 메시지를 찍고 exit 0 으로 끝나 사용자가 설치됐다고 믿는다.
 if [ -f "$SETTINGS" ] && command -v jq >/dev/null 2>&1; then

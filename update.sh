@@ -83,16 +83,25 @@ GLOBAL_CLAUDE="$HOME/.claude/CLAUDE.md"
 RULES_SRC="$PACKAGE_DIR/templates/claude-rules.md"
 if [ -f "$GLOBAL_CLAUDE" ] && [ -f "$RULES_SRC" ]; then
   python3 - "$GLOBAL_CLAUDE" "$RULES_SRC" << 'PYEOF'
-import sys, re
+import sys, re, shutil
 target, src = sys.argv[1], sys.argv[2]
 content = open(target).read()
-new_rules = "\n" + open(src).read()
-updated = re.sub(r'\n## Library 시스템.*', new_rules, content, flags=re.DOTALL)
-if updated != content:
-    open(target, 'w').write(updated)
-    print("  CLAUDE.md Library 섹션 업데이트")
+new_rules = "\n" + open(src).read().rstrip("\n") + "\n"
+
+# `.*` + DOTALL 은 파일 끝까지 먹는다. Library 섹션 뒤에 있던 사용자 규칙
+# (예: `# --- ai-bouncer-rule ---` 블록)이 통째로 삭제됐다 — 실제로 발생했다.
+# 다음 같은 레벨 헤딩 또는 `# ---` 센티널 직전에서 멈춘다.
+pattern = re.compile(r'\n## Library 시스템\n.*?(?=\n## (?!Library 시스템)|\n# ---|\Z)', re.DOTALL)
+if not pattern.search(content):
+    print("·  CLAUDE.md 에 Library 섹션 없음 — 건너뜀")
 else:
-    print("·  CLAUDE.md 변경 없음")
+    updated = pattern.sub(new_rules, content, count=1)
+    if updated != content:
+        shutil.copyfile(target, target + ".bak")   # 되돌릴 수 있게 남긴다
+        open(target, 'w').write(updated)
+        print("  CLAUDE.md Library 섹션 업데이트 (백업: CLAUDE.md.bak)")
+    else:
+        print("·  CLAUDE.md 변경 없음")
 PYEOF
 fi
 
