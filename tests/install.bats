@@ -1100,7 +1100,8 @@ from pathlib import Path
 s = Path(sys.argv[1]).read_text()
 a, b = '<!-- learnings-for-claude:rules start -->', '<!-- learnings-for-claude:rules end -->'
 assert s.count(a) == s.count(b) == 1
-assert s.index(a) < s.index('### 읽기') < s.index(b) < s.index('### 목차')
+assert s.index(a) < s.index('### 읽기') < s.index(b)
+assert not (s.index(a) < s.index('### 목차') < s.index(b))  # 목차는 사용자 소유 — 관리 블록 밖
 PY
 }
 

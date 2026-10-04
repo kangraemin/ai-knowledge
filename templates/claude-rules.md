@@ -1,9 +1,14 @@
-<!-- learnings-for-claude:rules start -->
 ## Library 시스템
 
 참조: `~/claude-library/GUIDE.md`
 
+### 목차
+> 카테고리별 한 줄 요약. 주제별 상세 목록은 `~/claude-library/CATALOG.md`.
+
+<!-- learnings-for-claude:rules start -->
+
 ### 읽기
+- 툴: `library_search` `library_read` `library_list` / `decision_list(repo)` `decision_search` `decision_read`
 - `library_search`는 **deferred tool** — 매 세션/작업 시작 시 반드시 먼저 `ToolSearch("select:mcp__claude-library__library_search")`로 로드한 뒤 사용한다
 - 아래 상황에서 **반드시** `library_search(query)`를 호출한다:
   - 기술 질문에 답하거나 접근법을 제안할 때
@@ -23,31 +28,34 @@
 - **개발 중 삽질로 알게 된 API/라이브러리 동작** — 에러로 발견한 것, 문서에 없는 것, 다음에 또 삽질할 것 같은 것. 발견 즉시 기록한다. 사용자가 요청하기 전에.
 - **틀린 내용을 교정받았을 때** — "그게 아니야"라고 교정받으면 그 자리에서 바로 저장. "저장할까요?" 묻지 않는다.
 
-### 분류 체계
-**`~/claude-library/TAXONOMY.md`를 먼저 확인한다.**
-- 매칭되는 카테고리/서브카테고리가 있으면 그곳에 저장
-- 없으면 TAXONOMY.md에 먼저 추가 후 저장
-- ❌ 대회명, 프로젝트명, 도구명을 카테고리/서브카테고리로 사용 금지
-- ✅ 기법/주제/도메인 기준으로 분류
 
-### 파일명 원칙
-- **"뭘 배웠는지"**가 파일명에 드러나야 한다
-- ❌ `discovery.md`, `lessons.md`, `backtest.md` (뭔지 모름)
-- ✅ `ar1-lag-is-dominant-signal.md`, `synthetic-data-distribution-overfit.md`
-- 예외: finance/ 하위 전략별 `backtest.md`는 폴더가 전략명이므로 OK
+### 지식이냐 결정사항이냐 — 먼저 가른다
 
-### 지식 파일 메타데이터
-- `source_session`: 어느 세션에서 발견했는지 (워크로그 날짜/시간 또는 세션 컨텍스트). 나중에 "이거 왜 이렇게 기록했지?" 역추적용.
+| | 지식 `library/` | 결정사항 `decisions/` |
+|---|---|---|
+| 판별 | **남의 프로젝트에도 그대로 참** | **우리가 이렇게 하기로 정한 것** |
+| 예 | "Granite에 react-native-svg 이미 번들됨" | "우리는 통과조건을 셸로 표현한다" |
+| 분류 | 카테고리/서브카테고리/주제 | **레포별 → 카테고리별** |
+| 꺼내기 | `library_search` (pull) | SessionStart 자동 주입 (push) |
+
+결정사항 카테고리 5개 고정: `architecture` `stack` `convention` `process` `scope`
+경로: `~/claude-library/decisions/<레포명>/<카테고리>/<slug>.md` (레포명 = git remote basename)
+
+### 형식 — OKF v0.2
+
+모든 문서는 Open Knowledge Format v0.2 프론트매터를 갖는다. `type`이 유일한 필수 필드.
+**상세 규칙·필드·이유는 `~/claude-library/GUIDE.md` 를 읽어라.** 여기에 중복 기술하지 않는다
+(같은 규칙을 두 곳에 적어서 실제로 드리프트가 난 전례가 있다).
+
+분류는 `~/claude-library/TAXONOMY.md`를 먼저 확인하고, 없으면 거기에 먼저 추가한다.
 
 기록 방법:
-1. **TAXONOMY.md 확인** — 매칭되는 분류 찾기, 없으면 추가
-2. 주제 폴더 확인/생성: `~/claude-library/library/[카테고리]/[서브카테고리]/[주제]/`
-3. 지식 파일 생성: 교훈이 드러나는 이름 (날짜 없음), `source_session` 포함
-4. 주제 `index.md` 생성/업데이트 + `관련:` 태그 추가 (관련 주제가 있으면)
-4.5. **관련 주제 자동 탐색**: `library_search()`로 새 파일의 핵심 키워드 검색 → 관련 주제 발견 시 양방향 `관련:` 태그 추가 (새 index.md + 기존 index.md 모두)
-5. `~/claude-library/LIBRARY.md` 업데이트
-6. CLAUDE.md 목차 업데이트
-6.5. **Synthesis 체크**: 같은 서브카테고리에 파일 3개 이상이면 "종합 문서 필요한가?" 자문 → 공통 패턴이 보이면 `library/synthesis/`에 작성
+1. **지식/결정사항 판별** → 저장소 결정
+2. TAXONOMY.md 확인 (지식) 또는 레포·카테고리 확정 (결정사항)
+3. 파일 생성 — OKF 프론트매터 + 교훈이 드러나는 파일명 (날짜 없음)
+4. **`index.md` / `LIBRARY.md` 는 손대지 않는다.** 자동 생성 대상이다
+5. **Synthesis 체크**: 같은 서브카테고리 3개 이상이면 종합 문서 검토 → `library/synthesis/`
+6. `~/claude-library/CATALOG.md` 에 한 줄 요약 추가 (CLAUDE.md `### 목차`는 카테고리 요약만 — 새 카테고리·핵심 결론일 때만 갱신)
 7. 즉시 commit/push:
    ```
    git -C ~/claude-library add -A
@@ -58,6 +66,3 @@
 
 미결 상태는 기록하지 않는다.
 <!-- learnings-for-claude:rules end -->
-
-### 목차
-> 설치 후 library에 지식이 쌓이면 여기에 카테고리별 주제 목록이 자동 추가됩니다.
