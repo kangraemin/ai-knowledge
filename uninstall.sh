@@ -8,25 +8,34 @@ HOOK_DEST="$HOOK_DIR/library-sync.sh"
 
 echo "learnings-for-claude 제거 중..."
 
+# 관리 규칙만 제거한다. 구형 무마커 설치는 기존 제거 범위를 유지한다.
+remove_library_rules() {
+  [ -f "$1" ] || return 0
+  python3 - "$1" <<'PYEOF'
+import sys, re, shutil
+from pathlib import Path
+p = Path(sys.argv[1])
+s = p.read_bytes()
+start = b"<!-- learnings-for-claude:rules start -->"
+end = b"<!-- learnings-for-claude:rules end -->"
+if start in s or end in s:
+    if s.count(start) != 1 or s.count(end) != 1 or s.index(start) >= s.index(end):
+        print("경고: CLAUDE.md 관리 마커 오류 — 원본 유지")
+        sys.exit(0)
+    s2 = s[:s.index(start)] + s[s.index(end) + len(end):]
+else:
+    s2 = re.sub(r"(?:^|\r?\n)## Library 시스템\r?\n.*?(?=\r?\n#{1,3} (?!Library 시스템)|\r?\n# ---|\Z)".encode(), b"\n", s, flags=re.S)
+if s2 != s:
+    shutil.copyfile(p, str(p) + ".bak")
+    p.write_bytes(s2)
+    print("  CLAUDE.md Library 규칙 제거 (백업: CLAUDE.md.bak)")
+PYEOF
+}
+
 # 1. 프로젝트 CLAUDE.md에서 규칙 제거
 CLAUDE_MD="$TARGET/CLAUDE.md"
 GLOBAL_CLAUDE_MD="$HOME/.claude/CLAUDE.md"
-MARKER="## Library 시스템"
-
-if [ -f "$CLAUDE_MD" ] && grep -qF "$MARKER" "$CLAUDE_MD"; then
-  python3 - "$CLAUDE_MD" <<'PYEOF'
-import sys, re, shutil
-p = sys.argv[1]
-s = open(p).read()
-# 종료조건에 레벨1/3 헤딩과 `# ---` 센티널을 모두 포함한다.
-# `^## ` 만 보면 그 뒤 사용자 규칙이 통째로 사라진다 — 실제로 발생했다.
-s2 = re.sub(r"\n## Library 시스템\n.*?(?=\n#{1,3} (?!Library 시스템)|\n# ---|\Z)", "\n", s, flags=re.S)
-if s2 != s:
-    shutil.copyfile(p, p + ".bak")
-    open(p, "w").write(s2.rstrip("\n") + "\n")
-PYEOF
-  echo "  $TARGET/CLAUDE.md 규칙 제거 (백업: CLAUDE.md.bak)"
-fi
+remove_library_rules "$CLAUDE_MD"
 
 # 2. 훅 제거 여부 확인
 if command -v jq &>/dev/null && grep -qF "library-sync" "$SETTINGS" 2>/dev/null; then
@@ -92,19 +101,7 @@ if [ "$_lfc_installed" = "1" ]; then
 fi
 
 # 4. ~/.claude/CLAUDE.md 의 Library 블록 제거 (install 은 여기에 쓴다)
-if [ -f "$GLOBAL_CLAUDE_MD" ] && grep -q "^## Library 시스템" "$GLOBAL_CLAUDE_MD"; then
-  python3 - "$GLOBAL_CLAUDE_MD" <<'PYEOF'
-import sys, re
-p = sys.argv[1]
-s = open(p).read()
-# "## Library 시스템" 부터 다음 같은 레벨 헤딩(또는 EOF) 직전까지 삭제
-s2 = re.sub(r"\n## Library 시스템\n.*?(?=\n#{1,3} (?!Library 시스템)|\n# ---|\Z)", "\n", s, flags=re.S)
-if s2 != s:
-    import shutil; shutil.copyfile(p, p + ".bak")   # 되돌릴 수 있게 남긴다
-    open(p, "w").write(s2.rstrip("\n") + "\n")
-PYEOF
-  echo "  ~/.claude/CLAUDE.md 의 Library 블록 제거"
-fi
+remove_library_rules "$GLOBAL_CLAUDE_MD"
 rm -f "$HOME/.claude/hooks/.learnings-version"
 
 rm -f "$HOOK_DIR/.learnings-kb-spec" "$HOOK_DIR/.learnings-branch" "$HOOK_DIR/.learnings-version-checked"

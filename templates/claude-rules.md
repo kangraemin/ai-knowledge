@@ -1,9 +1,7 @@
+<!-- learnings-for-claude:rules start -->
 ## Library 시스템
 
 참조: `~/claude-library/GUIDE.md`
-
-### 목차
-> 설치 후 library에 지식이 쌓이면 여기에 카테고리별 주제 목록이 자동 추가됩니다.
 
 ### 읽기
 - `library_search`는 **deferred tool** — 매 세션/작업 시작 시 반드시 먼저 `ToolSearch("select:mcp__claude-library__library_search")`로 로드한 뒤 사용한다
@@ -59,3 +57,7 @@
 8. 한 줄로 알린다: `📚 library에 추가: [경로]`
 
 미결 상태는 기록하지 않는다.
+<!-- learnings-for-claude:rules end -->
+
+### 목차
+> 설치 후 library에 지식이 쌓이면 여기에 카테고리별 주제 목록이 자동 추가됩니다.

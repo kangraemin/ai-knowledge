@@ -2,6 +2,64 @@
 # learnings-for-claude 자동 업데이트 체커
 # Usage: update-check.sh [--branch <name>] [--force] [--check-only]
 
+# 설치/수동 업데이트에서도 같은 MCP 전환 함수를 사용한다.
+update_library_mcp() {
+  local branch="$1" spec="$2" mode="${3:-update}"
+  local sf tmp snapshot found=false
+  command -v jq >/dev/null 2>&1 || { echo "브랜치 설정에는 jq가 필요합니다." >&2; return 1; }
+  # 어느 한쪽에만 등록되어 있으면 다른 파일에 중복 등록하지 않는다.
+  for sf in "$HOME/.claude/settings.json" "$HOME/.claude.json"; do
+    [ -f "$sf" ] || continue
+    if ! jq -e -s 'length == 1 and (.[0] | type == "object")' "$sf" >/dev/null 2>&1; then
+      echo "경고: $sf JSON 오류 — MCP 변경 중단" >&2
+      return 1
+    fi
+    if jq -e '.mcpServers["claude-library"] | type == "object"' "$sf" >/dev/null; then
+      found=true
+    fi
+  done
+  for sf in "$HOME/.claude/settings.json" "$HOME/.claude.json"; do
+    [ -f "$sf" ] || continue
+    if ! jq -e '.mcpServers["claude-library"] | type == "object"' "$sf" >/dev/null; then
+      # 등록이 전혀 없을 때만 기존 settings.json 등록 동작을 유지한다.
+      [ "$found" = false ] && [ "$sf" = "$HOME/.claude/settings.json" ] || continue
+    fi
+    snapshot=$(mktemp "$sf.snapshot.XXXXXX") || return 1
+    tmp=$(mktemp "$sf.tmp.XXXXXX") || { rm -f "$snapshot"; return 1; }
+    # 변경 직전 스냅샷을 사용하고 동시 쓰기가 감지되면 덮어쓰지 않는다.
+    if ! cp -p "$sf" "$snapshot" || ! jq --arg branch "$branch" --arg spec "$spec" \
+      --arg home "$HOME" --arg mode "$mode" '
+      .mcpServers["claude-library"].command = "uvx" |
+      .mcpServers["claude-library"].args = (if $branch == "main" then
+        ["--with", "mcp<2", "claude-library-mcp@latest"] else
+        ["--with", "mcp<2", "--from", $spec, "claude-library-mcp"] end) |
+      if $mode == "install" then
+        .mcpServers["claude-library"].env.LIBRARY_ROOT //= ($home + "/claude-library")
+      else . end
+    ' "$snapshot" > "$tmp" || ! jq -e -s 'length == 1 and (.[0] | type == "object")' "$tmp" >/dev/null; then
+      rm -f "$snapshot" "$tmp"
+      echo "경고: $sf MCP 변경 실패 — 원본 유지" >&2
+      return 1
+    fi
+    if ! cmp -s "$sf" "$snapshot"; then
+      rm -f "$snapshot" "$tmp"
+      echo "경고: $sf 동시 변경 감지 — 다시 실행하세요" >&2
+      return 1
+    fi
+    if ! cmp -s "$sf" "$tmp"; then
+      cp -p "$snapshot" "$sf.bak" && mv "$tmp" "$sf" || { rm -f "$snapshot" "$tmp"; return 1; }
+    fi
+    rm -f "$snapshot" "$tmp"
+  done
+  mkdir -p "$HOME/.claude/hooks"
+  printf '%s\n' "$spec" > "$HOME/.claude/hooks/.learnings-kb-spec"
+}
+
+# source 할 때 체크/다운로드 등 실행 부작용 없이 함수만 제공한다.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  return 0
+fi
+
 set -euo pipefail
 
 # 브랜치 설정: 명시 옵션은 저장하고 환경변수는 실행 시에만 우선한다.
@@ -47,17 +105,8 @@ CHECKED_FILE="$HOOK_DIR/.learnings-version-checked"
 
 # 명시적인 브랜치 선택은 MCP 실행 소스도 함께 갱신한다.
 SETTINGS="$HOME/.claude/settings.json"
-if [ -n "$BRANCH_OPTION" ] && [ -f "$SETTINGS" ]; then
-  command -v jq >/dev/null 2>&1 || { echo "브랜치 설정에는 jq가 필요합니다." >&2; exit 1; }
-  cp "$SETTINGS" "$SETTINGS.bak"
-  jq --arg branch "$BRANCH" --arg spec "$KB_SPEC" '
-    .mcpServers["claude-library"].command = "uvx" |
-    .mcpServers["claude-library"].args = (if $branch == "main" then
-      ["--with", "mcp<2", "claude-library-mcp@latest"] else
-      ["--with", "mcp<2", "--from", $spec, "claude-library-mcp"] end)
-  ' "$SETTINGS" > "$SETTINGS.tmp.$$"
-  mv "$SETTINGS.tmp.$$" "$SETTINGS"
-  printf '%s\n' "$KB_SPEC" > "$HOME/.claude/hooks/.learnings-kb-spec"
+if [ -n "$BRANCH_OPTION" ]; then
+  update_library_mcp "$BRANCH" "$KB_SPEC"
 fi
 
 # ── 누락 hook 검증 (매 세션) ──────────────────────────────────────────────────

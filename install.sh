@@ -299,7 +299,6 @@ fi
 
 # --- ~/.claude/CLAUDE.md에 규칙 추가/업데이트 ---
 GLOBAL_CLAUDE="$CLAUDE_DIR/CLAUDE.md"
-MARKER="## Library 시스템"
 RULES_SRC="$SCRIPT_DIR/templates/claude-rules.md"
 
 _inject_rules() {
@@ -308,51 +307,39 @@ _inject_rules() {
     echo "  $(msg '경고: templates/claude-rules.md 없음 — 스킵' 'Warning: templates/claude-rules.md not found — skipped')"
     return
   fi
-  if grep -qF "$MARKER" "$target" 2>/dev/null; then
-    python3 - "$target" "$RULES_SRC" << 'PYEOF'
-import sys, re
-target, src = sys.argv[1], sys.argv[2]
-content = open(target).read()
-new_block = open(src).read()
-
-START = '## Library 시스템'
-start_idx = content.find('\n' + START)
-if start_idx != -1:
-    rest = content[start_idx + 1:]
-    # 다음 섹션(## 또는 # ---) 직전까지만 교체
-    end_match = re.search(r'\n(#{1,3} |# ---)', rest)
-    if end_match:
-        end_idx = start_idx + 1 + end_match.start()
-        content = content[:start_idx + 1] + new_block + '\n\n' + content[end_idx:]
-    else:
-        content = content[:start_idx + 1] + new_block + '\n'
-open(target, 'w').write(content)
-PYEOF
-    echo "  $(msg '~/.claude/CLAUDE.md 규칙 업데이트' '~/.claude/CLAUDE.md rules updated')"
-  else
-    python3 - "$target" "$RULES_SRC" << 'PYEOF'
-import sys, re
-import os
-target, src = sys.argv[1], sys.argv[2]
-# 신규 설치에는 CLAUDE.md 가 아직 없다. 없으면 새로 만든다 (예전엔 여기서 크래시)
-import shutil
-os.makedirs(os.path.dirname(target) or ".", exist_ok=True)   # 신규 설치엔 .claude/ 자체가 없다
-_existed = os.path.exists(target)
-content = open(target).read() if _existed else ""
-if _existed:
-    shutil.copyfile(target, target + ".bak")   # 되돌릴 수 있게 남긴다
-new_block = open(src).read()
-
-# ai-bouncer 섹션 앞에 삽입, 없으면 파일 끝에 추가
-bouncer_idx = content.find('\n# ---')
-if bouncer_idx != -1:
-    content = content[:bouncer_idx + 1] + new_block + '\n\n' + content[bouncer_idx + 1:]
+  python3 - "$target" "$RULES_SRC" << 'PYEOF'
+import sys, shutil
+from pathlib import Path
+target, src = map(Path, sys.argv[1:3])
+content = target.read_bytes() if target.exists() else b""
+template = src.read_bytes()
+start = b"<!-- learnings-for-claude:rules start -->"
+end = b"<!-- learnings-for-claude:rules end -->"
+valid = (content.count(start) == content.count(end) == 1
+         and content.index(start) < content.index(end))
+if start in content or end in content:
+    if not valid:
+        print("경고: CLAUDE.md 관리 마커가 올바른 한 쌍이 아님 — 원본 유지")
+        sys.exit(0)
+    block = template[template.index(start):template.index(end) + len(end)]
+    updated = content[:content.index(start)] + block + content[content.index(end) + len(end):]
 else:
-    content = content.rstrip('\n') + '\n\n' + new_block + '\n'
-open(target, 'w').write(content)
+    updated = None
+    if "## Library 시스템".encode() in content:
+        Path(str(target) + ".library-rules.new").write_bytes(template)
+        print("  CLAUDE.md 원본 유지 — 새 규칙: CLAUDE.md.library-rules.new")
+    else:
+        # 기존 사용자 규칙 바이트를 유지하고 sentinel 앞에 새 영역을 추가한다.
+        idx = content.find(b"# ---")
+        if idx < 0:
+            idx = len(content)
+        updated = content[:idx] + b"\n\n" + template + b"\n" + content[idx:]
+if updated is not None and updated != content:
+    if target.exists():
+        shutil.copyfile(target, str(target) + ".bak")
+    target.write_bytes(updated)
+    print("  CLAUDE.md 관리 규칙 갱신 (기존 파일 백업: CLAUDE.md.bak)")
 PYEOF
-    echo "  $(msg '~/.claude/CLAUDE.md 규칙 추가' '~/.claude/CLAUDE.md rules added')"
-  fi
 }
 
 mkdir -p "$(dirname "$GLOBAL_CLAUDE")"
@@ -644,19 +631,8 @@ fi
 
 # --- MCP 서버 등록 ---
 if command -v jq >/dev/null 2>&1; then
-  if python3 -m json.tool "$SETTINGS" 2>/dev/null | grep -q "claude-library-mcp\|claude-library"; then
-    echo "  $(msg 'MCP claude-library 이미 존재 — uvx로 업데이트' 'MCP claude-library already exists — updating via uvx')"
-  fi
-  cp "$SETTINGS" "$SETTINGS.bak"
-  jq --arg home "$HOME" --arg branch "$BRANCH" --arg spec "$KB_SPEC" '
-    .mcpServers["claude-library"].command = "uvx" |
-    .mcpServers["claude-library"].env.LIBRARY_ROOT //= ($home + "/claude-library") |
-    .mcpServers["claude-library"].args = (if $branch == "main" then
-      ["--with", "mcp<2", "claude-library-mcp@latest"] else
-      ["--with", "mcp<2", "--from", $spec, "claude-library-mcp"] end)
-  ' "$SETTINGS" > "$SETTINGS.tmp.$$"
-  mv "$SETTINGS.tmp.$$" "$SETTINGS"
-  printf '%s\n' "$KB_SPEC" > "$HOME/.claude/hooks/.learnings-kb-spec"
+  source "$SCRIPT_DIR/scripts/update-check.sh"
+  update_library_mcp "$BRANCH" "$KB_SPEC" install
   echo "  $(msg 'MCP 서버 등록: claude-library-mcp (uvx)' 'MCP server registered: claude-library-mcp (uvx)')"
 fi
 

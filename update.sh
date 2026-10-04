@@ -138,25 +138,30 @@ if [ -f "$GLOBAL_CLAUDE" ] && [ ! -f "$RULES_SRC" ]; then
 fi
 if [ -f "$GLOBAL_CLAUDE" ] && [ -f "$RULES_SRC" ]; then
   python3 - "$GLOBAL_CLAUDE" "$RULES_SRC" << 'PYEOF'
-import sys, re, shutil
-target, src = sys.argv[1], sys.argv[2]
-content = open(target).read()
-new_rules = "\n" + open(src).read().rstrip("\n") + "\n"
-
-# `.*` + DOTALL 은 파일 끝까지 먹는다. Library 섹션 뒤에 있던 사용자 규칙
-# (예: `# --- ai-bouncer-rule ---` 블록)이 통째로 삭제됐다 — 실제로 발생했다.
-# 다음 같은 레벨 헤딩 또는 `# ---` 센티널 직전에서 멈춘다.
-pattern = re.compile(r'\n## Library 시스템\n.*?(?=\n#{1,3} (?!Library 시스템)|\n# ---|\Z)', re.DOTALL)
-if not pattern.search(content):
-    print("·  CLAUDE.md 에 Library 섹션 없음 — 건너뜀")
+import sys, shutil
+from pathlib import Path
+target, src = map(Path, sys.argv[1:3])
+content = target.read_bytes() if target.exists() else b""
+template = src.read_bytes()
+start = b"<!-- learnings-for-claude:rules start -->"
+end = b"<!-- learnings-for-claude:rules end -->"
+valid = (content.count(start) == content.count(end) == 1
+         and content.index(start) < content.index(end))
+if start in content or end in content:
+    if not valid:
+        print("경고: CLAUDE.md 관리 마커가 올바른 한 쌍이 아님 — 원본 유지")
+        sys.exit(0)
+    block = template[template.index(start):template.index(end) + len(end)]
+    updated = content[:content.index(start)] + block + content[content.index(end) + len(end):]
 else:
-    updated = pattern.sub(new_rules, content, count=1)
-    if updated != content:
-        shutil.copyfile(target, target + ".bak")   # 되돌릴 수 있게 남긴다
-        open(target, 'w').write(updated)
-        print("  CLAUDE.md Library 섹션 업데이트 (백업: CLAUDE.md.bak)")
-    else:
-        print("·  CLAUDE.md 변경 없음")
+    updated = None
+    Path(str(target) + ".library-rules.new").write_bytes(template)
+    print("  CLAUDE.md 원본 유지 — 새 규칙: CLAUDE.md.library-rules.new")
+if updated is not None and updated != content:
+    if target.exists():
+        shutil.copyfile(target, str(target) + ".bak")
+    target.write_bytes(updated)
+    print("  CLAUDE.md 관리 규칙 갱신 (기존 파일 백업: CLAUDE.md.bak)")
 PYEOF
 fi
 
@@ -222,18 +227,9 @@ if [ -f "$PACKAGE_DIR/hooks/library-autoinject.sh" ]; then
   fi
 fi
 
-# MCP는 선택한 브랜치와 같은 소스를 실행한다. 기존 env 등은 보존한다.
-if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
-  cp "$SETTINGS" "$SETTINGS.bak"
-  jq --arg branch "$BRANCH" --arg spec "$KB_SPEC" '
-    .mcpServers["claude-library"].command = "uvx" |
-    .mcpServers["claude-library"].args = (if $branch == "main" then
-      ["--with", "mcp<2", "claude-library-mcp@latest"] else
-      ["--with", "mcp<2", "--from", $spec, "claude-library-mcp"] end)
-  ' "$SETTINGS" > "$SETTINGS.tmp.$$"
-  mv "$SETTINGS.tmp.$$" "$SETTINGS"
-  printf '%s\n' "$KB_SPEC" > "$HOME/.claude/hooks/.learnings-kb-spec"
-fi
+# MCP 전환은 설치/자동 체커와 같은 함수를 사용한다.
+source "$PACKAGE_DIR/scripts/update-check.sh"
+update_library_mcp "$BRANCH" "$KB_SPEC"
 
 # 버전 기록
 LATEST_SHA=$(git -C "$PACKAGE_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")

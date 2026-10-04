@@ -265,3 +265,7 @@ The installer registers `library-autoinject.sh` on `UserPromptSubmit` with a 5-s
 ## License
 
 MIT
+
+User-scope MCP servers are stored in `~/.claude.json` ([official documentation](https://code.claude.com/docs/en/mcp#user-scope)). Branch switches update existing `claude-library` registrations in both that file and `~/.claude/settings.json`, preserving other servers, `type`, `env`, and project data. Each changed file gets a `.bak`; JSON is validated before atomic replacement. Invalid JSON is left untouched. If neither file has a registration, the existing settings.json registration behavior is retained.
+
+Rules installed in `~/.claude/CLAUDE.md` are enclosed by `<!-- learnings-for-claude:rules start -->` and `<!-- learnings-for-claude:rules end -->`. The table of contents stays outside this managed block. Updates replace only the managed block and save a `.bak`. Legacy files without markers are preserved; the new template is written to `CLAUDE.md.library-rules.new` for manual merging. Keep your table of contents and custom rules outside the markers when adopting the new template. Incomplete, reversed, or duplicate markers produce a warning without changing the file. Uninstall removes the managed block while preserving the table of contents; legacy removal remains supported.

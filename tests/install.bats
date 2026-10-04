@@ -138,10 +138,11 @@ install_with_answers() {
   grep -q "# Existing Rules" "$CLAUDE_DIR/CLAUDE.md"
 }
 
-@test "TC-12: replaces Library section in existing CLAUDE.md" {
+@test "TC-12: preserves legacy Library section on reinstall" {
   printf "# Rules\n\n## Library 시스템\nOLD_CONTENT\n" > "$CLAUDE_DIR/CLAUDE.md"
   install_with_input "1"
-  ! grep -q "OLD_CONTENT" "$CLAUDE_DIR/CLAUDE.md"
+  grep -q "OLD_CONTENT" "$CLAUDE_DIR/CLAUDE.md"
+  [ -f "$CLAUDE_DIR/CLAUDE.md.library-rules.new" ]
 }
 
 @test "TC-13: preserves content before Library section after update" {
@@ -1009,4 +1010,206 @@ PY
   [ -n "$output" ]
   python3 -c 'import json,os; assert json.load(open(os.environ["KB_ARGV"]))[:3] == ["--custom","argument with spaces","search"]'
   export PATH="$ORIG_TEST_PATH"
+}
+
+# 사용자 목차와 자체 하위 규칙을 포함한 실제 구조의 축소 픽스처.
+legacy_rules_fixture() {
+  python3 - "$CLAUDE_DIR/CLAUDE.md" <<'PY'
+import sys
+from pathlib import Path
+s = '# Global Rules\n사용자 규칙\n\n## Library 시스템\n\n참조: GUIDE.md\n\n### 목차\n'
+s += ''.join(f'- finance/topic-{i}/ — 사용자 지식 {i}\n' for i in range(20))
+s += '\n### 읽기\n사용자 검색 규칙\n### 쓰기\n사용자 저장 규칙\n'
+s += '### 지식이냐 결정사항이냐\n사용자 분류\n### 형식 — OKF v0.2\ntype 필수\n'
+s += '\n# --- ai-bouncer-rule start ---\n기존 규칙 보존\n# --- ai-bouncer-rule end ---\n'
+Path(sys.argv[1]).write_bytes(s.replace('\n', '\r\n').encode())
+PY
+}
+
+@test "TC-89: update preserves legacy user rules byte for byte and offers new template" {
+  install_with_input 1
+  legacy_rules_fixture
+  cp "$CLAUDE_DIR/CLAUDE.md" "$TEST_HOME/before"
+  bash "$SOURCE_DIR/update.sh"
+  cmp "$TEST_HOME/before" "$CLAUDE_DIR/CLAUDE.md"
+  cmp "$SOURCE_DIR/templates/claude-rules.md" "$CLAUDE_DIR/CLAUDE.md.library-rules.new"
+  bash "$SOURCE_DIR/update.sh"
+  cmp "$TEST_HOME/before" "$CLAUDE_DIR/CLAUDE.md"
+}
+
+@test "TC-90: marked update changes only managed block and backs up original" {
+  install_with_input 1
+  legacy_rules_fixture
+  python3 - "$CLAUDE_DIR/CLAUDE.md" <<'PY'
+import sys
+from pathlib import Path
+p = Path(sys.argv[1])
+s = p.read_bytes()
+s = s.replace('참조: GUIDE.md'.encode(), b'<!-- learnings-for-claude:rules start -->\r\nOLD_RULES\r\n<!-- learnings-for-claude:rules end -->')
+p.write_bytes(s)
+PY
+  cp "$CLAUDE_DIR/CLAUDE.md" "$TEST_HOME/before"
+  bash "$SOURCE_DIR/update.sh"
+  cmp "$TEST_HOME/before" "$CLAUDE_DIR/CLAUDE.md.bak"
+  python3 - "$TEST_HOME/before" "$CLAUDE_DIR/CLAUDE.md" "$SOURCE_DIR/templates/claude-rules.md" <<'PY'
+import sys
+from pathlib import Path
+before, after, template = [Path(p).read_bytes() for p in sys.argv[1:]]
+a, b = b'<!-- learnings-for-claude:rules start -->', b'<!-- learnings-for-claude:rules end -->'
+assert before.split(a)[0] == after.split(a)[0]
+assert before.split(b)[1] == after.split(b)[1]
+assert after.split(a)[1].split(b)[0] == template.split(a)[1].split(b)[0]
+PY
+}
+
+@test "TC-91: marked update is byte idempotent including backup" {
+  install_with_input 1
+  sed 's/### 읽기/### OLD 읽기/' "$CLAUDE_DIR/CLAUDE.md" > "$TEST_HOME/old"
+  mv "$TEST_HOME/old" "$CLAUDE_DIR/CLAUDE.md"
+  bash "$SOURCE_DIR/update.sh"
+  cp "$CLAUDE_DIR/CLAUDE.md" "$TEST_HOME/once"
+  cp "$CLAUDE_DIR/CLAUDE.md.bak" "$TEST_HOME/backup"
+  bash "$SOURCE_DIR/update.sh"
+  cmp "$TEST_HOME/once" "$CLAUDE_DIR/CLAUDE.md"
+  cmp "$TEST_HOME/backup" "$CLAUDE_DIR/CLAUDE.md.bak"
+}
+
+@test "TC-92: missing reversed and duplicate markers warn without changing rules" {
+  install_with_input 1
+  local markers
+  for markers in start end 'end start' 'start start end' 'start end end'; do
+    printf '# User\n' > "$CLAUDE_DIR/CLAUDE.md"
+    for marker in $markers; do
+      printf '<!-- learnings-for-claude:rules %s -->\n' "$marker" >> "$CLAUDE_DIR/CLAUDE.md"
+    done
+    cp "$CLAUDE_DIR/CLAUDE.md" "$TEST_HOME/before"
+    run bash "$SOURCE_DIR/update.sh"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'경고: CLAUDE.md 관리 마커'* ]]
+    cmp "$TEST_HOME/before" "$CLAUDE_DIR/CLAUDE.md"
+    install_with_input 1
+    cmp "$TEST_HOME/before" "$CLAUDE_DIR/CLAUDE.md"
+  done
+}
+
+@test "TC-93: fresh install puts table of contents outside exactly one managed block" {
+  install_with_input 1
+  python3 - "$CLAUDE_DIR/CLAUDE.md" <<'PY'
+import sys
+from pathlib import Path
+s = Path(sys.argv[1]).read_text()
+a, b = '<!-- learnings-for-claude:rules start -->', '<!-- learnings-for-claude:rules end -->'
+assert s.count(a) == s.count(b) == 1
+assert s.index(a) < s.index('### 읽기') < s.index(b) < s.index('### 목차')
+PY
+}
+
+# 두 등록 위치의 나머지 필드와 큰 projects 객체를 비교한다.
+mcp_user_fixture() {
+  python3 - "$HOME/.claude.json" <<'PY'
+import json, sys
+cfg = {'mcpServers': {'claude-library': {'type': 'stdio', 'command': 'uvx', 'args': ['old'], 'env': {'EXTRA': 'keep', 'LIBRARY_ROOT': '/custom'}}, 'other': {'command': 'keep'}}, 'projects': {f'/project/{i}': {'history': ['사용자 데이터'] * 20, 'mcpServers': {'claude-library': {'args': ['local']}}} for i in range(200)}, 'custom': True}
+with open(sys.argv[1], 'w') as f:
+    json.dump(cfg, f)
+PY
+  cp "$HOME/.claude.json" "$TEST_HOME/user-before"
+}
+
+assert_mcp_preserved() {
+  python3 - "$TEST_HOME/user-before" "$HOME/.claude.json" <<'PY'
+import json, sys
+before, after = [json.load(open(p)) for p in sys.argv[1:]]
+for cfg in (before, after):
+    cfg['mcpServers']['claude-library'].pop('args')
+assert before == after
+PY
+}
+
+@test "TC-94: all entrypoints switch and restore both MCP files preserving user objects" {
+  install_with_input 1
+  mcp_user_fixture
+  local entry branch
+  for entry in install update checker; do
+    for branch in feat/dual main; do
+      case "$entry" in
+        install) install_with_input 1 --branch "$branch" ;;
+        update) bash "$SOURCE_DIR/update.sh" --branch "$branch" ;;
+        checker) bash "$CLAUDE_DIR/hooks/learnings-update-check.sh" --branch "$branch" --check-only ;;
+      esac
+      jq -s -e '.[0].mcpServers["claude-library"].args == .[1].mcpServers["claude-library"].args' "$SETTINGS" "$HOME/.claude.json"
+      if [ "$branch" = main ]; then
+        jq -e '.mcpServers["claude-library"].args == ["--with","mcp<2","claude-library-mcp@latest"]' "$HOME/.claude.json"
+      else
+        jq -e '.mcpServers["claude-library"].args == ["--with","mcp<2","--from","git+https://github.com/kangraemin/learnings-for-claude@feat/dual#subdirectory=mcp-server","claude-library-mcp"]' "$HOME/.claude.json"
+      fi
+      assert_mcp_preserved
+      [ -f "$HOME/.claude.json.bak" ]
+    done
+  done
+}
+
+@test "TC-95: all entrypoints handle user-only MCP without creating duplicate registration" {
+  install_with_input 1
+  mcp_user_fixture
+  jq 'del(.mcpServers["claude-library"])' "$SETTINGS" > "$SETTINGS.new"
+  mv "$SETTINGS.new" "$SETTINGS"
+  local entry branch
+  for entry in install update checker; do
+    for branch in feat/only main; do
+      case "$entry" in
+        install) install_with_input 1 --branch "$branch" ;;
+        update) bash "$SOURCE_DIR/update.sh" --branch "$branch" ;;
+        checker) bash "$SOURCE_DIR/scripts/update-check.sh" --branch "$branch" --check-only ;;
+      esac
+      jq -e '.mcpServers | has("claude-library") | not' "$SETTINGS"
+      if [ "$branch" = main ]; then
+        jq -e '.mcpServers["claude-library"].args[-1] == "claude-library-mcp@latest"' "$HOME/.claude.json"
+      else
+        jq -e '.mcpServers["claude-library"].args[3] | contains("@feat/only#")' "$HOME/.claude.json"
+      fi
+      assert_mcp_preserved
+    done
+  done
+}
+
+@test "TC-96: broken user JSON remains byte identical for every entrypoint" {
+  install_with_input 1
+  printf '{"projects": broken\n' > "$HOME/.claude.json"
+  cp "$HOME/.claude.json" "$TEST_HOME/broken"
+  local entry
+  for entry in install update checker; do
+    case "$entry" in
+      install) run install_with_input 1 --branch feat/broken ;;
+      update) run bash "$SOURCE_DIR/update.sh" --branch feat/broken ;;
+      checker) run bash "$SOURCE_DIR/scripts/update-check.sh" --branch feat/broken --check-only ;;
+    esac
+    [ "$status" -ne 0 ]
+    cmp "$TEST_HOME/broken" "$HOME/.claude.json"
+    [ ! -e "$HOME/.claude.json.bak" ]
+  done
+}
+
+@test "TC-97: uninstall removes managed block but preserves user table and trailing rules" {
+  install_with_input 1
+  printf '\n- topic: 사용자 지식\n# --- ai-bouncer-rule start ---\n유지\n' >> "$CLAUDE_DIR/CLAUDE.md"
+  cp "$CLAUDE_DIR/CLAUDE.md" "$TEST_HOME/before"
+  sed 's|</dev/tty||g' "$SOURCE_DIR/uninstall.sh" > "$TEST_HOME/uninstall.sh"
+  bash "$TEST_HOME/uninstall.sh" "$TEST_HOME" <<< n
+  python3 - "$TEST_HOME/before" "$CLAUDE_DIR/CLAUDE.md" <<'PY'
+import sys
+from pathlib import Path
+before, after = [Path(p).read_bytes() for p in sys.argv[1:]]
+a, b = b'<!-- learnings-for-claude:rules start -->', b'<!-- learnings-for-claude:rules end -->'
+assert after == before.split(a)[0] + before.split(b)[1]
+PY
+}
+
+@test "TC-98: shared MCP updater rejects broken settings JSON without modifying either file" {
+  mcp_user_fixture
+  printf '{broken\n' > "$SETTINGS"
+  cp "$SETTINGS" "$TEST_HOME/broken"
+  run bash -c 'source "$SOURCE_DIR/scripts/update-check.sh"; update_library_mcp feat/test test-spec'
+  [ "$status" -ne 0 ]
+  cmp "$TEST_HOME/broken" "$SETTINGS"
+  cmp "$TEST_HOME/user-before" "$HOME/.claude.json"
 }

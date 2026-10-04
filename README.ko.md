@@ -265,3 +265,7 @@ bash update.sh --branch main
 ## 라이선스
 
 MIT
+
+User-scope MCP 서버의 공식 저장 위치는 `~/.claude.json`입니다([공식 문서](https://code.claude.com/docs/en/mcp#user-scope)). 브랜치 전환은 이 파일과 `~/.claude/settings.json`에서 기존 `claude-library` 등록이 있는 곳을 모두 갱신하며, 다른 서버·`type`·`env`·프로젝트 데이터는 보존합니다. 변경 파일마다 `.bak`을 남기고 JSON 검증 후 원자 교체합니다. 깨진 JSON은 수정하지 않습니다. 두 파일 모두 등록이 없으면 기존 settings.json 등록 동작을 유지합니다.
+
+`~/.claude/CLAUDE.md`의 설치 규칙은 `<!-- learnings-for-claude:rules start -->`와 `<!-- learnings-for-claude:rules end -->`로 감쌉니다. 목차는 마커 밖의 사용자 영역입니다. 업데이트는 관리 블록만 교체하고 `.bak`을 남깁니다. 기존 무마커 파일은 보존하고 새 템플릿을 `CLAUDE.md.library-rules.new`에 저장합니다. 새 템플릿을 수동 병합할 때 기존 목차와 자체 규칙은 마커 밖에 유지하세요. 마커 누락·역순·중복은 경고 후 무변경 처리합니다. 제거 시 관리 블록만 삭제하여 목차를 보존하며, 기존 무마커 제거도 지원합니다.
