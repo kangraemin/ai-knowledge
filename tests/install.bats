@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# install.sh E2E tests (62 cases)
+# install.sh / update.sh E2E tests
 
 setup() {
   export TEST_HOME="$(mktemp -d)"
@@ -10,12 +10,34 @@ setup() {
   export SETTINGS="$CLAUDE_DIR/settings.json"
   export INSTALL_SH="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/install.sh"
 
+  unset LEARNINGS_BRANCH LEARNINGS_AUTO_UPDATE LIBRARY_KB_CMD LIBRARY_AUTOINJECT KB_SLEEP KB_FAIL
+  export ORIG_TEST_PATH="$PATH"
+  export REPO_DIR="$(dirname "$INSTALL_SH")"
+  # 네트워크와 실제 홈에 의존하지 않는 소스 복제본.
+  export SOURCE_DIR="$TEST_HOME/source"
+  mkdir -p "$SOURCE_DIR" "$TEST_HOME/bin"
+  cp -R "$REPO_DIR/hooks" "$REPO_DIR/scripts" "$REPO_DIR/skills" "$REPO_DIR/templates" "$SOURCE_DIR/"
+  cp "$REPO_DIR/install.sh" "$REPO_DIR/update.sh" "$REPO_DIR/uninstall.sh" "$REPO_DIR/GUIDE.md" "$REPO_DIR/TAXONOMY.md" "$SOURCE_DIR/"
+  [ -f "$SOURCE_DIR/hooks/library-autoinject.sh" ] || printf '#!/bin/bash\nexit 0\n' > "$SOURCE_DIR/hooks/library-autoinject.sh"
+  export INSTALL_SH="$SOURCE_DIR/install.sh"
+  export CURL_LOG="$TEST_HOME/curl.log"
+  cat > "$TEST_HOME/bin/curl" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >> "$CURL_LOG"
+case "$*" in
+  */commits/*) printf '{"sha":"abcdef123456789"}\n' ;;
+  *) exit 22 ;;
+esac
+STUB
+  chmod +x "$TEST_HOME/bin/curl"
+  export PATH="$TEST_HOME/bin:$PATH"
   mkdir -p "$CLAUDE_DIR/hooks" "$CLAUDE_DIR/skills"
   echo '{"hooks":{},"mcpServers":{}}' > "$SETTINGS"
 }
 
 teardown() {
   export HOME="$ORIG_HOME"
+  export PATH="$ORIG_TEST_PATH"
   rm -rf "$TEST_HOME"
 }
 
@@ -23,6 +45,7 @@ teardown() {
 # Patches /dev/tty reads to use stdin, but preserves SCRIPT_DIR pointing to real repo
 install_with_input() {
   local input="$1"
+  shift
   local patched="$TEST_HOME/install_patched.sh"
   local real_script_dir
   real_script_dir="$(cd "$(dirname "$INSTALL_SH")" && pwd)"
@@ -33,7 +56,7 @@ install_with_input() {
   # install.sh 는 프롬프트가 여러 개다(언어·git방식·Notion·프로젝트경로).
   # 한 줄만 주면 두 번째 read 에서 EOF → set -e 로 죽는다.
   # 첫 답을 주고 나머지는 기본값(빈 줄)으로 흘려보낸다.
-  { echo "$input"; for _ in $(seq 1 20); do echo ""; done; } | bash "$patched" 2>&1
+  { echo "$input"; for _ in $(seq 1 20); do echo ""; done; } | bash "$patched" "$@" 2>&1
 }
 
 # 여러 프롬프트에 순서대로 답한다. 예: install_with_answers "1" "1"
@@ -717,4 +740,273 @@ for ev in ('PreToolUse', 'PostToolUse'):
     dupes = [k for k, n in c.items() if n > 1]
     assert not dupes, (ev, dupes)
 "
+}
+
+# ─── 브랜치 추적과 자동 주입 설치 ───
+
+@test "TC-73: install persists branch and main removes it" {
+  install_with_input 1 --branch feat/test
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-branch")" = feat/test ]
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = "git+https://github.com/kangraemin/learnings-for-claude@feat/test#subdirectory=mcp-server" ]
+  install_with_input 1 --branch main
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = claude-library-mcp ]
+  [ ! -e "$CLAUDE_DIR/hooks/.learnings-branch" ]
+}
+
+@test "TC-74: all entrypoints reject invalid and missing branches" {
+  local script branch
+  for script in install.sh update.sh scripts/update-check.sh; do
+    for branch in 'a..b' 'a b' 'a;b' ''; do
+      run bash "$SOURCE_DIR/$script" --branch "$branch"
+      [ "$status" -eq 1 ]
+      [ ! -e "$CLAUDE_DIR/hooks/.learnings-branch" ]
+    done
+    run bash "$SOURCE_DIR/$script" --branch
+    [ "$status" -eq 1 ]
+  done
+}
+
+@test "TC-75: update switches MCP source and restores PyPI preserving settings" {
+  install_with_input 1
+  jq '.custom = {keep: true} | .mcpServers.other = {command:"other"} | .mcpServers["claude-library"].env.EXTRA = "keep"' "$SETTINGS" > "$SETTINGS.new"
+  mv "$SETTINGS.new" "$SETTINGS"
+  bash "$SOURCE_DIR/update.sh" --branch feat/test
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-branch")" = feat/test ]
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = "git+https://github.com/kangraemin/learnings-for-claude@feat/test#subdirectory=mcp-server" ]
+  jq -e '.mcpServers["claude-library"].args == ["--with","mcp<2","--from","git+https://github.com/kangraemin/learnings-for-claude@feat/test#subdirectory=mcp-server","claude-library-mcp"]' "$SETTINGS"
+  [ -f "$SETTINGS.bak" ]
+  jq -e ' .custom.keep and .mcpServers.other.command == "other"' "$SETTINGS.bak"
+  grep -q '^feat/test@' "$CLAUDE_DIR/hooks/.learnings-version"
+  bash "$SOURCE_DIR/update.sh" --branch main
+  [ ! -e "$CLAUDE_DIR/hooks/.learnings-branch" ]
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = claude-library-mcp ]
+  jq -e '.custom.keep and .mcpServers.other.command == "other" and .mcpServers["claude-library"].env.EXTRA == "keep" and .mcpServers["claude-library"].args == ["--with","mcp<2","claude-library-mcp@latest"]' "$SETTINGS"
+}
+
+@test "TC-76: env branch overrides stored branch in install update and checker" {
+  export LEARNINGS_BRANCH=feat/env
+  install_with_input 1 --branch feat/file
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-branch")" = feat/file ]
+  jq -e '.mcpServers["claude-library"].args[3] | contains("@feat/env#")' "$SETTINGS"
+  bash "$SOURCE_DIR/update.sh"
+  grep -q '^feat/env@' "$CLAUDE_DIR/hooks/.learnings-version"
+  bash "$SOURCE_DIR/scripts/update-check.sh" --check-only
+  grep -q '/commits/feat/env' "$CURL_LOG"
+}
+
+@test "TC-77: checker persists branch uses branch URL and resets main" {
+  touch "$CLAUDE_DIR/hooks/library-sync.sh"
+  run bash "$SOURCE_DIR/scripts/update-check.sh" --branch feat/api --check-only
+  [ "$status" -eq 0 ]
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-branch")" = feat/api ]
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = "git+https://github.com/kangraemin/learnings-for-claude@feat/api#subdirectory=mcp-server" ]
+  grep -q '/commits/feat/api' "$CURL_LOG"
+  jq -e '.mcpServers["claude-library"].args[3] | contains("@feat/api#")' "$SETTINGS"
+  run bash "$SOURCE_DIR/scripts/update-check.sh" --branch main --check-only
+  [ "$status" -eq 0 ]
+  [ ! -e "$CLAUDE_DIR/hooks/.learnings-branch" ]
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = claude-library-mcp ]
+  grep -q '/commits/main' "$CURL_LOG"
+  jq -e '.mcpServers["claude-library"].args == ["--with","mcp<2","claude-library-mcp@latest"]' "$SETTINGS"
+}
+
+@test "TC-78: checker reads legacy and branch versions without cross-branch equality" {
+  touch "$CLAUDE_DIR/hooks/library-sync.sh"
+  local version
+  for version in abcdef1 main@abcdef1; do
+    echo "$version" > "$CLAUDE_DIR/hooks/.learnings-version"
+    run bash "$SOURCE_DIR/scripts/update-check.sh" --check-only
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'status: up-to-date'* ]]
+    run bash "$SOURCE_DIR/scripts/update-check.sh" --branch feat/test --check-only
+    [[ "$output" == *'status: update-available'* ]]
+    rm "$CLAUDE_DIR/hooks/.learnings-branch"
+  done
+  echo feat/test@abcdef1 > "$CLAUDE_DIR/hooks/.learnings-version"
+  run bash "$SOURCE_DIR/scripts/update-check.sh" --branch feat/test --check-only
+  [[ "$output" == *'status: up-to-date'* ]]
+}
+
+@test "TC-79: autoinject installs once with timeout 5 and uninstall preserves other hooks" {
+  install_with_input 1
+  install_with_input 1
+  bash "$SOURCE_DIR/update.sh"
+  bash "$SOURCE_DIR/update.sh"
+  [ -x "$CLAUDE_DIR/hooks/library-autoinject.sh" ]
+  jq -e '[.hooks.UserPromptSubmit[].hooks[] | select(.command | endswith("/library-autoinject.sh"))] | length == 1 and .[0].timeout == 5' "$SETTINGS"
+  jq '.hooks.UserPromptSubmit[0].hooks += [{type:"command",command:"keep-me",timeout:2}]' "$SETTINGS" > "$SETTINGS.new"
+  mv "$SETTINGS.new" "$SETTINGS"
+  sed 's|</dev/tty||g' "$SOURCE_DIR/uninstall.sh" > "$TEST_HOME/uninstall.sh"
+  bash "$TEST_HOME/uninstall.sh" "$TEST_HOME" <<< n
+  [ ! -e "$CLAUDE_DIR/hooks/library-autoinject.sh" ]
+  jq -e '[.hooks.UserPromptSubmit[].hooks[].command] == ["keep-me"]' "$SETTINGS"
+}
+
+@test "TC-80: checker clones selected branch only on explicit force or auto update" {
+  touch "$CLAUDE_DIR/hooks/library-sync.sh"
+  cat > "$TEST_HOME/bin/git" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >> "$HOME/git.log"
+[ "$1" = clone ] || exit 1
+mkdir -p "$7"
+printf '#!/bin/bash\nprintf "%%s\n" "$LEARNINGS_BRANCH" > "$HOME/applied"\n' > "$7/update.sh"
+STUB
+  chmod +x "$TEST_HOME/bin/git"
+  run bash "$SOURCE_DIR/scripts/update-check.sh" --branch feat/clone
+  [ "$status" -eq 0 ]
+  [[ "$output" == *'새 버전 있음'* ]]
+  [ ! -e "$HOME/git.log" ]
+  run bash "$SOURCE_DIR/scripts/update-check.sh" --branch feat/clone --force
+  [ "$status" -eq 0 ]
+  [ "$(cat "$HOME/applied")" = feat/clone ]
+  grep -q 'clone --depth 1 -b feat/clone' "$HOME/git.log"
+  rm "$HOME/applied"
+  LEARNINGS_AUTO_UPDATE=1 run bash "$SOURCE_DIR/scripts/update-check.sh" --branch feat/clone
+  [ "$status" -eq 0 ]
+  [ -f "$HOME/applied" ]
+}
+
+@test "TC-81: update bootstrap clones selected branch" {
+  install_with_input 1
+  cp "$SOURCE_DIR/update.sh" "$TEST_HOME/standalone-update.sh"
+  cat > "$TEST_HOME/bin/git" <<'STUB'
+#!/bin/bash
+if [ "$1" = clone ]; then
+  printf '%s\n' "$*" > "$HOME/git.log"
+  printf '%s\n' "$7" > "$HOME/clone-path"
+  cp -R "$SOURCE_DIR" "$7"
+else
+  echo abcdef1
+fi
+STUB
+  chmod +x "$TEST_HOME/bin/git"
+  run bash "$TEST_HOME/standalone-update.sh" --branch feat/bootstrap
+  [ "$status" -eq 0 ]
+  grep -q 'clone --depth 1 -b feat/bootstrap' "$HOME/git.log"
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-version")" = feat/bootstrap@abcdef1 ]
+  [ ! -d "$(cat "$HOME/clone-path")" ]
+}
+
+@test "TC-82: checker throttle follows env branch and accepts legacy timestamps" {
+  touch "$CLAUDE_DIR/hooks/library-sync.sh"
+  date +%s > "$CLAUDE_DIR/hooks/.learnings-version-checked"
+  run bash "$SOURCE_DIR/scripts/update-check.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$CURL_LOG" ]
+  LEARNINGS_BRANCH=feat/env run bash "$SOURCE_DIR/scripts/update-check.sh"
+  [ "$status" -eq 0 ]
+  grep -q '/commits/feat/env' "$CURL_LOG"
+  grep -q '^feat/env@' "$CLAUDE_DIR/hooks/.learnings-version-checked"
+  rm "$CURL_LOG"
+  LEARNINGS_BRANCH=feat/env run bash "$SOURCE_DIR/scripts/update-check.sh"
+  [ "$status" -eq 0 ]
+  [ ! -e "$CURL_LOG" ]
+  run bash "$SOURCE_DIR/scripts/update-check.sh"
+  [ "$status" -eq 0 ]
+  grep -q '/commits/main' "$CURL_LOG"
+}
+
+@test "TC-83: checker compares full and longer abbreviated SHA versions" {
+  touch "$CLAUDE_DIR/hooks/library-sync.sh"
+  local version
+  for version in abcdef123456789 main@abcdef123456789 main@abcdef1234; do
+    echo "$version" > "$CLAUDE_DIR/hooks/.learnings-version"
+    run bash "$SOURCE_DIR/scripts/update-check.sh" --check-only
+    [ "$status" -eq 0 ]
+    [[ "$output" == *'status: up-to-date'* ]]
+  done
+}
+
+@test "TC-84: installed checker is the source script and uninstall removes tracking files" {
+  install_with_input 1 --branch feat/test
+  cmp "$SOURCE_DIR/scripts/update-check.sh" "$CLAUDE_DIR/hooks/learnings-update-check.sh"
+  touch "$CLAUDE_DIR/hooks/.learnings-version-checked"
+  sed 's|</dev/tty||g' "$SOURCE_DIR/uninstall.sh" > "$TEST_HOME/uninstall.sh"
+  bash "$TEST_HOME/uninstall.sh" "$TEST_HOME" <<< n
+  [ ! -e "$CLAUDE_DIR/hooks/.learnings-branch" ]
+  [ ! -e "$CLAUDE_DIR/hooks/.learnings-version" ]
+  [ ! -e "$CLAUDE_DIR/hooks/.learnings-version-checked" ]
+  [ ! -e "$CLAUDE_DIR/hooks/.learnings-kb-spec" ]
+}
+
+# Isolated PATH guarantees fallback tests cannot accidentally use a real CLI.
+setup_kb_path() {
+  export KB_ARGV="$TEST_HOME/argv.json"
+  export PATH="$TEST_HOME/kb-bin"
+  /bin/mkdir -p "$PATH"
+  /bin/ln -s /bin/bash "$PATH/bash"
+  /bin/ln -s /bin/sleep "$PATH/sleep"
+  /bin/ln -s "$KB_PYTHON" "$PATH/python3"
+  /bin/cat > "$PATH/uvx" <<'STUB'
+#!/bin/bash
+python3 -c 'import json,os,sys; json.dump(sys.argv[1:],open(os.environ["KB_ARGV"],"w"))' "$@"
+if [ "${KB_SLEEP:-0}" = 1 ]; then sleep 10; fi
+[ "${KB_FAIL:-0}" = 1 ] && exit 1
+printf '검색 결과: 룩어헤드 누수\n'
+STUB
+  /bin/chmod +x "$PATH/uvx"
+}
+
+@test "TC-85: uvx fallback receives exact spec argv and returns hook JSON" {
+  export KB_PYTHON="$(command -v python3)"
+  setup_kb_path
+  local spec='git+https://github.com/kangraemin/learnings-for-claude@feat/test#subdirectory=mcp-server'
+  printf '%s\n' "$spec" > "$CLAUDE_DIR/hooks/.learnings-kb-spec"
+  run bash "$SOURCE_DIR/hooks/library-autoinject.sh" <<< '{"prompt":"백테스트 룩어헤드 누수 어떻게 잡지"}'
+  [ "$status" -eq 0 ]
+  python3 -c 'import json,sys; assert json.loads(sys.argv[1]) == {"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"검색 결과: 룩어헤드 누수"}}' "$output"
+  python3 -c 'import json,os,sys; assert json.load(open(os.environ["KB_ARGV"])) == ["--with","mcp<2","--from",sys.argv[1],"claude-library-kb","search","--format","inject","--budget","1500","--","백테스트 룩어헤드 누수 어떻게 잡지"]' "$spec"
+  export PATH="$ORIG_TEST_PATH"
+}
+
+@test "TC-86: short slash and disabled prompts never invoke uvx" {
+  export KB_PYTHON="$(command -v python3)"
+  setup_kb_path
+  echo claude-library-mcp > "$CLAUDE_DIR/hooks/.learnings-kb-spec"
+  local payload
+  for payload in '{"prompt":"짧음"}' '{"prompt":"  /library search something"}'; do
+    run bash "$SOURCE_DIR/hooks/library-autoinject.sh" <<< "$payload"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+    [ ! -e "$KB_ARGV" ]
+  done
+  LIBRARY_AUTOINJECT=0 run bash "$SOURCE_DIR/hooks/library-autoinject.sh" <<< '{"prompt":"백테스트 룩어헤드 누수 어떻게 잡지"}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  [ ! -e "$KB_ARGV" ]
+  export PATH="$ORIG_TEST_PATH"
+}
+
+@test "TC-87: sleeping uvx exits silently in five seconds and failure is silent" {
+  export KB_PYTHON="$(command -v python3)"
+  setup_kb_path
+  echo claude-library-mcp > "$CLAUDE_DIR/hooks/.learnings-kb-spec"
+  KB_SLEEP=1 python3 - "$SOURCE_DIR/hooks/library-autoinject.sh" <<'PY'
+import subprocess,sys,time
+start=time.monotonic()
+p=subprocess.run(["bash",sys.argv[1]],input='{"prompt":"백테스트 룩어헤드 누수 어떻게 잡지"}',capture_output=True,text=True,timeout=8)
+elapsed=time.monotonic()-start
+assert p.returncode == 0 and not p.stdout and not p.stderr, p
+assert 5 <= elapsed < 7, elapsed
+PY
+  KB_FAIL=1 run bash "$SOURCE_DIR/hooks/library-autoinject.sh" <<< '{"prompt":"백테스트 룩어헤드 누수 어떻게 잡지"}'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+  export PATH="$ORIG_TEST_PATH"
+}
+
+@test "TC-88: override precedes PATH CLI which precedes uvx" {
+  export KB_PYTHON="$(command -v python3)"
+  setup_kb_path
+  /bin/cp "$PATH/uvx" "$PATH/claude-library-kb"
+  # No spec file: PATH CLI must still work.
+  run bash "$SOURCE_DIR/hooks/library-autoinject.sh" <<< '{"prompt":"백테스트 룩어헤드 누수 어떻게 잡지"}'
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  python3 -c 'import json,os; assert json.load(open(os.environ["KB_ARGV"]))[0] == "search"'
+  LIBRARY_KB_CMD='uvx --custom "argument with spaces"' run bash "$SOURCE_DIR/hooks/library-autoinject.sh" <<< '{"prompt":"백테스트 룩어헤드 누수 어떻게 잡지"}'
+  [ "$status" -eq 0 ]
+  [ -n "$output" ]
+  python3 -c 'import json,os; assert json.load(open(os.environ["KB_ARGV"]))[:3] == ["--custom","argument with spaces","search"]'
+  export PATH="$ORIG_TEST_PATH"
 }

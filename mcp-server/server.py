@@ -189,39 +189,16 @@ def library_search(query: str) -> str:
     Args:
         query: search keywords (e.g. "hook timing", "spring test", "bb rsi crypto")
     """
+    from kb import api
+    if api.postgres():
+        return api.search_text(query)
     matches = _search(query)
 
     if not matches:
         return f"'{query}' 관련 라이브러리 항목 없음."
 
-    parts = []
-    for m in matches:
-        seg, label_parts = None, []
-        for part in (m["category"], m["subcategory"], m["topic"]):
-            if part and part != seg:
-                label_parts.append(part)
-                seg = part
-        label = "/".join(label_parts)
-        header = f"## {label}/{m['filename']}"
-        if m["description"]:
-            header += f"\n> {m['description']}"
-        parts.append(header)
-
-        # Body preview (first ~200 chars, cut at line boundary)
-        if m["body"]:
-            preview_lines = []
-            char_count = 0
-            for line in m["body"].splitlines():
-                if char_count + len(line) > 300:
-                    break
-                preview_lines.append(line)
-                char_count += len(line)
-            if preview_lines:
-                parts.append("\n".join(preview_lines))
-
-        parts.append(f"`library_read('{m['path']}')`로 전문 읽기\n")
-
-    return "\n".join(parts)
+    from kb.search import format_results
+    return format_results(matches, token_budget=10000)
 
 
 @mcp.tool()
@@ -233,6 +210,9 @@ def library_read(path: str) -> str:
     Args:
         path: library/ 로 시작하는 상대 경로 (예: "library/equity/vix-filter/index.md")
     """
+    from kb import api
+    if api.postgres():
+        return api.read(path)
     full_path = _safe_path(path)
     if full_path is None:
         return f"{path} 는 라이브러리 밖이다"
@@ -247,6 +227,9 @@ def library_list() -> str:
     라이브러리 전체 인덱스를 반환합니다.
     어떤 카테고리/주제가 있는지 전체 파악이 필요할 때 사용하세요.
     """
+    from kb import api
+    if api.postgres():
+        return api.listing()
     # OKF §8: 번들 루트 index.md 가 정본. LIBRARY.md 는 하위호환 롤업.
     for candidate in ("index.md", "LIBRARY.md"):
         path = LIBRARY_ROOT / candidate
@@ -341,6 +324,9 @@ def decision_list(repo: str) -> str:
     Args:
         repo: git remote basename (예: "ai-bouncer", "coinbot", "stock-bot")
     """
+    from kb import api
+    if api.postgres():
+        return api.listing(repo)
     entries = [e for e in _decision_entries(repo) if e["status"] != "deprecated"]
     if not entries:
         return f"'{repo}' 레포에 등록된 활성 결정사항 없음."
@@ -372,6 +358,9 @@ def decision_search(query: str, repo: str = "") -> str:
         query: 검색 키워드
         repo: 특정 레포로 한정 (생략하면 전체)
     """
+    from kb import api
+    if api.postgres():
+        return api.search_text(query, kind="decision", repo=repo)
     terms = [t for t in re.split(r"[\s,]+", query.lower()) if t]
     if not terms:
         return "검색어 없음."
@@ -409,12 +398,47 @@ def decision_read(path: str) -> str:
     Args:
         path: decisions/ 로 시작하는 상대 경로
     """
+    from kb import api
+    if api.postgres():
+        return api.read(path)
     full = _safe_path(path)
     if full is None:
         return f"{path} 는 라이브러리 밖이다"
     if not full.exists():
         return f"{path} 없음"
     return _read_file(full)
+
+
+@mcp.tool()
+def library_write(path: str, markdown: str, scope: str | None = None,
+                  expected_version: int | None = None, kind: str = "knowledge") -> str:
+    """Postgres 문서 저장. 기존 문서는 expected_version을 지정한다."""
+    from kb import api
+    if not api.postgres():
+        return "쓰기 툴은 LIBRARY_BACKEND=postgres에서 사용할 수 있습니다."
+    return api.write(path, markdown, scope, expected_version, kind)
+
+
+@mcp.tool()
+def library_relate(src_path: str, dst_path: str, type: str) -> str:
+    """관계 연결. supersedes는 대상 문서를 같은 트랜잭션에서 폐기한다."""
+    from kb import api, store
+    if not api.postgres():
+        return "쓰기 툴은 LIBRARY_BACKEND=postgres에서 사용할 수 있습니다."
+    with api.connect() as conn:
+        store.relate(conn, src_path, dst_path, type)
+    return "관계 저장 완료"
+
+
+@mcp.tool()
+def library_promote(path: str) -> str:
+    """inbox 후보를 stable knowledge로 승격한다."""
+    from kb import api, store
+    if not api.postgres():
+        return "쓰기 툴은 LIBRARY_BACKEND=postgres에서 사용할 수 있습니다."
+    with api.connect() as conn:
+        store.promote(conn, path)
+    return "승격 완료"
 
 
 def main():

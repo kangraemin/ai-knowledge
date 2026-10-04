@@ -1,0 +1,18 @@
+services:
+  postgres:
+    build: ./docker
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: kb_dev
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - kb_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d kb_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  kb_data:

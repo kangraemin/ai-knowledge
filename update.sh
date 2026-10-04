@@ -1,6 +1,35 @@
 #!/bin/bash
 set -e
 
+# 브랜치 설정: 명시 옵션은 저장하고 환경변수는 실행 시에만 우선한다.
+BRANCH_FILE="$HOME/.claude/hooks/.learnings-branch"
+BRANCH_OPTION=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --branch)
+      [ "$#" -ge 2 ] || { echo "--branch 값이 필요합니다." >&2; exit 1; }
+      BRANCH_OPTION="$2"
+      [[ "$BRANCH_OPTION" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$BRANCH_OPTION" != *..* ]] || { echo "잘못된 브랜치명" >&2; exit 1; }
+      shift 2 ;;
+    *) echo "알 수 없는 옵션: $1" >&2; exit 1 ;;
+  esac
+done
+BRANCH="${LEARNINGS_BRANCH:-${BRANCH_OPTION:-$(cat "$BRANCH_FILE" 2>/dev/null || echo main)}}"
+[[ "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$BRANCH" != *..* ]] || { echo "잘못된 브랜치명" >&2; exit 1; }
+KB_SPEC="claude-library-mcp"
+if [ "$BRANCH" != main ]; then
+  KB_SPEC="git+https://github.com/kangraemin/learnings-for-claude@$BRANCH#subdirectory=mcp-server"
+fi
+if [ -n "$BRANCH_OPTION" ]; then
+  mkdir -p "$(dirname "$BRANCH_FILE")"
+  if [ "$BRANCH_OPTION" = main ]; then
+    rm -f "$BRANCH_FILE"
+  else
+    printf '%s\n' "$BRANCH_OPTION" > "$BRANCH_FILE"
+  fi
+  rm -f "$HOME/.claude/hooks/.learnings-version-checked"
+fi
+
 GREEN='\033[0;32m'
 DIM='\033[2m'
 BOLD='\033[1m'
@@ -33,13 +62,16 @@ if [ ! -f "$PACKAGE_DIR/hooks/library-sync.sh" ]; then
   echo -e "${BOLD}최신 소스 다운로드 중...${NC}"
   TMPDIR_UPDATE=$(mktemp -d)
   trap 'rm -rf "$TMPDIR_UPDATE"' EXIT
-  git clone --depth 1 https://github.com/kangraemin/learnings-for-claude.git "$TMPDIR_UPDATE/learnings-for-claude" -q
+  git clone --depth 1 -b "$BRANCH" https://github.com/kangraemin/learnings-for-claude.git "$TMPDIR_UPDATE/learnings-for-claude" -q
   PACKAGE_DIR="$TMPDIR_UPDATE/learnings-for-claude"
   ok "다운로드 완료"
 
   if [ "${_UPDATE_BOOTSTRAPPED:-}" != "1" ] && [ -f "$PACKAGE_DIR/update.sh" ]; then
     export _UPDATE_BOOTSTRAPPED=1
-    exec bash "$PACKAGE_DIR/update.sh" "$@"
+    export LEARNINGS_BRANCH="$BRANCH"
+    # exec하면 부모 EXIT trap이 사라져 다운로드 디렉터리가 남는다.
+    bash "$PACKAGE_DIR/update.sh"
+    exit $?
   fi
 fi
 
@@ -175,9 +207,37 @@ if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
   fi
 fi
 
+# --- UserPromptSubmit: 검색 결과 자동 주입 ---
+if [ -f "$PACKAGE_DIR/hooks/library-autoinject.sh" ]; then
+  copy_if_changed "$PACKAGE_DIR/hooks/library-autoinject.sh" "$HOOK_DIR/library-autoinject.sh" "library-autoinject.sh (prompt hook)"
+  if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
+    cp "$SETTINGS" "$SETTINGS.bak"
+    jq --arg cmd "$HOME/.claude/hooks/library-autoinject.sh" '
+      .hooks.UserPromptSubmit = (
+        [(.hooks.UserPromptSubmit // [])[] |
+          .hooks |= map(select(.command != $cmd)) | select(.hooks | length > 0)] +
+        [{hooks: [{type: "command", command: $cmd, timeout: 5}]}])
+    ' "$SETTINGS" > "$SETTINGS.tmp.$$"
+    mv "$SETTINGS.tmp.$$" "$SETTINGS"
+  fi
+fi
+
+# MCP는 선택한 브랜치와 같은 소스를 실행한다. 기존 env 등은 보존한다.
+if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
+  cp "$SETTINGS" "$SETTINGS.bak"
+  jq --arg branch "$BRANCH" --arg spec "$KB_SPEC" '
+    .mcpServers["claude-library"].command = "uvx" |
+    .mcpServers["claude-library"].args = (if $branch == "main" then
+      ["--with", "mcp<2", "claude-library-mcp@latest"] else
+      ["--with", "mcp<2", "--from", $spec, "claude-library-mcp"] end)
+  ' "$SETTINGS" > "$SETTINGS.tmp.$$"
+  mv "$SETTINGS.tmp.$$" "$SETTINGS"
+  printf '%s\n' "$KB_SPEC" > "$HOME/.claude/hooks/.learnings-kb-spec"
+fi
+
 # 버전 기록
 LATEST_SHA=$(git -C "$PACKAGE_DIR" rev-parse --short HEAD 2>/dev/null || echo "unknown")
-echo "$LATEST_SHA" > "$HOOK_DIR/.learnings-version"
+echo "$BRANCH@$LATEST_SHA" > "$HOOK_DIR/.learnings-version"
 
 echo ""
 echo -e "${GREEN}✓${NC}  ${BOLD}업데이트 완료${NC} — ${GREEN}${UPDATED}개 업데이트${NC}, ${DIM}${UNCHANGED}개 변경 없음${NC}"

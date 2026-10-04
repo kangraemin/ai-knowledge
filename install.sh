@@ -1,6 +1,35 @@
 #!/bin/bash
 set -e
 
+# 브랜치 설정: 명시 옵션은 저장하고 환경변수는 실행 시에만 우선한다.
+BRANCH_FILE="$HOME/.claude/hooks/.learnings-branch"
+BRANCH_OPTION=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --branch)
+      [ "$#" -ge 2 ] || { echo "--branch 값이 필요합니다." >&2; exit 1; }
+      BRANCH_OPTION="$2"
+      [[ "$BRANCH_OPTION" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$BRANCH_OPTION" != *..* ]] || { echo "잘못된 브랜치명" >&2; exit 1; }
+      shift 2 ;;
+    *) echo "알 수 없는 옵션: $1" >&2; exit 1 ;;
+  esac
+done
+BRANCH="${LEARNINGS_BRANCH:-${BRANCH_OPTION:-$(cat "$BRANCH_FILE" 2>/dev/null || echo main)}}"
+[[ "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$BRANCH" != *..* ]] || { echo "잘못된 브랜치명" >&2; exit 1; }
+KB_SPEC="claude-library-mcp"
+if [ "$BRANCH" != main ]; then
+  KB_SPEC="git+https://github.com/kangraemin/learnings-for-claude@$BRANCH#subdirectory=mcp-server"
+fi
+if [ -n "$BRANCH_OPTION" ]; then
+  mkdir -p "$(dirname "$BRANCH_FILE")"
+  if [ "$BRANCH_OPTION" = main ]; then
+    rm -f "$BRANCH_FILE"
+  else
+    printf '%s\n' "$BRANCH_OPTION" > "$BRANCH_FILE"
+  fi
+  rm -f "$HOME/.claude/hooks/.learnings-version-checked"
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_DIR="$HOME/.claude"
 LIB_DIR="$HOME/claude-library"
@@ -96,7 +125,7 @@ EOF
 fi
 
 if [ ! -f "$LIB_DIR/GUIDE.md" ]; then
-  curl -sf --max-time 10 "https://raw.githubusercontent.com/kangraemin/learnings-for-claude/main/GUIDE.md" \
+  curl -sf --max-time 10 "https://raw.githubusercontent.com/kangraemin/learnings-for-claude/$BRANCH/GUIDE.md" \
     -o "$LIB_DIR/GUIDE.md" 2>/dev/null || \
   cat > "$LIB_DIR/GUIDE.md" << 'EOF'
 # Library 작성 가이드
@@ -155,7 +184,7 @@ EOF
 fi
 
 if [ ! -f "$LIB_DIR/TAXONOMY.md" ]; then
-  curl -sf --max-time 10 "https://raw.githubusercontent.com/kangraemin/learnings-for-claude/main/TAXONOMY.md" \
+  curl -sf --max-time 10 "https://raw.githubusercontent.com/kangraemin/learnings-for-claude/$BRANCH/TAXONOMY.md" \
     -o "$LIB_DIR/TAXONOMY.md" 2>/dev/null || \
   cp "$SCRIPT_DIR/TAXONOMY.md" "$LIB_DIR/TAXONOMY.md" 2>/dev/null || true
 fi
@@ -391,84 +420,12 @@ fi
 # --- SessionStart 자동 업데이트 체크 훅 등록 ---
 UPDATE_CHECK_DEST="$CLAUDE_DIR/hooks/learnings-update-check.sh"
 
+cp "$SCRIPT_DIR/scripts/update-check.sh" "$UPDATE_CHECK_DEST"
+chmod +x "$UPDATE_CHECK_DEST"
+
 if grep -qF "learnings-update-check" "$SETTINGS" 2>/dev/null; then
   echo "  $(msg '자동 업데이트 훅 이미 존재 — 스킵' 'Auto-update hook already exists — skipped')"
 else
-  cat > "$UPDATE_CHECK_DEST" << 'EOF'
-#!/bin/bash
-# learnings-for-claude 자동 업데이트 체커
-
-set -euo pipefail
-
-REPO="kangraemin/learnings-for-claude"
-API_URL="https://api.github.com/repos/$REPO/commits/main"
-RAW_BASE="https://raw.githubusercontent.com/$REPO/main"
-
-HOOK_DIR="$HOME/.claude/hooks"
-VERSION_FILE="$HOOK_DIR/.learnings-version"
-CHECKED_FILE="$HOOK_DIR/.learnings-version-checked"
-SELF="$HOOK_DIR/learnings-update-check.sh"
-
-FORCE=false
-CHECK_ONLY=false
-for arg in "$@"; do
-  case $arg in
-    --force)      FORCE=true ;;
-    --check-only) CHECK_ONLY=true ;;
-  esac
-done
-
-[ -f "$HOOK_DIR/library-sync.sh" ] || exit 0
-
-if [ "$FORCE" = false ] && [ "$CHECK_ONLY" = false ] && [ -f "$CHECKED_FILE" ]; then
-  LAST=$(cat "$CHECKED_FILE" 2>/dev/null || echo 0)
-  NOW=$(date +%s)
-  if [ $(( NOW - LAST )) -lt 86400 ]; then
-    exit 0
-  fi
-fi
-
-LATEST_SHA=$(curl -sf --max-time 5 "$API_URL" 2>/dev/null | \
-  python3 -c "import json,sys; print(json.load(sys.stdin)['sha'][:7])" 2>/dev/null) || exit 0
-
-date +%s > "$CHECKED_FILE"
-
-INSTALLED_SHA=$(cat "$VERSION_FILE" 2>/dev/null || echo "unknown")
-
-if [ "$CHECK_ONLY" = true ]; then
-  echo "installed: $INSTALLED_SHA"
-  echo "latest:    $LATEST_SHA"
-  [ "$LATEST_SHA" = "$INSTALLED_SHA" ] && echo "status: up-to-date" || echo "status: update-available"
-  exit 0
-fi
-
-[ "$LATEST_SHA" = "$INSTALLED_SHA" ] && exit 0
-
-if [ "${_LEARNINGS_BOOTSTRAPPED:-}" != "1" ]; then
-  SELF_TMP=$(mktemp)
-  trap 'rm -f "$SELF_TMP"' EXIT
-  if curl -sf --max-time 10 "$RAW_BASE/scripts/update-check.sh" -o "$SELF_TMP" 2>/dev/null && \
-     [ -s "$SELF_TMP" ] && bash -n "$SELF_TMP" 2>/dev/null; then
-    if ! cmp -s "$SELF_TMP" "$SELF" 2>/dev/null; then
-      mv "$SELF_TMP" "$SELF"
-      chmod +x "$SELF"
-      trap - EXIT
-      export _LEARNINGS_BOOTSTRAPPED=1
-      exec bash "$SELF" --force
-    fi
-  fi
-  rm -f "$SELF_TMP"
-  trap - EXIT
-fi
-
-CLONE_DIR=$(mktemp -d)
-trap 'rm -rf "$CLONE_DIR"' EXIT
-git clone --depth 1 "https://github.com/$REPO.git" "$CLONE_DIR/learnings-for-claude" -q 2>/dev/null || exit 0
-bash "$CLONE_DIR/learnings-for-claude/update.sh" || exit 0
-echo "learnings-for-claude $INSTALLED_SHA → $LATEST_SHA updated"
-EOF
-
-  chmod +x "$UPDATE_CHECK_DEST"
 
   if command -v jq >/dev/null 2>&1; then
     CHECK_HOOK_JSON="{\"hooks\":[{\"type\":\"command\",\"command\":\"$UPDATE_CHECK_DEST\",\"timeout\":15,\"async\":true}]}"
@@ -477,13 +434,12 @@ EOF
       "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
   fi
 
-  # 초기 버전 기록
-  curl -sfL --max-time 5 "https://api.github.com/repos/kangraemin/learnings-for-claude/commits/main" 2>/dev/null | \
-    python3 -c "import json,sys; print(json.load(sys.stdin)['sha'][:7])" \
-    > "$CLAUDE_DIR/hooks/.learnings-version" 2>/dev/null || true
-
   echo "  $(msg 'SessionStart 자동 업데이트 체크 등록' 'SessionStart auto-update check registered')"
 fi
+
+# 설치한 소스의 버전을 기록한다.
+INSTALLED_SHA=$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)
+printf '%s@%s\n' "$BRANCH" "$INSTALLED_SHA" > "$CLAUDE_DIR/hooks/.learnings-version"
 
 # --- 구버전 정리: policy-inject.sh → decision-inject.sh 개명 마이그레이션 ---
 if [ -f "$CLAUDE_DIR/hooks/policy-inject.sh" ]; then
@@ -670,16 +626,37 @@ else
   echo "  $(msg 'Stop 훅 등록: code-lesson-check.sh' 'Stop hook registered: code-lesson-check.sh')"
 fi
 
+# --- UserPromptSubmit: 검색 결과 자동 주입 ---
+if [ -f "$SCRIPT_DIR/hooks/library-autoinject.sh" ]; then
+  cp "$SCRIPT_DIR/hooks/library-autoinject.sh" "$HOME/.claude/hooks/library-autoinject.sh"
+  chmod +x "$HOME/.claude/hooks/library-autoinject.sh"
+  if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
+    cp "$SETTINGS" "$SETTINGS.bak"
+    jq --arg cmd "$HOME/.claude/hooks/library-autoinject.sh" '
+      .hooks.UserPromptSubmit = (
+        [(.hooks.UserPromptSubmit // [])[] |
+          .hooks |= map(select(.command != $cmd)) | select(.hooks | length > 0)] +
+        [{hooks: [{type: "command", command: $cmd, timeout: 5}]}])
+    ' "$SETTINGS" > "$SETTINGS.tmp.$$"
+    mv "$SETTINGS.tmp.$$" "$SETTINGS"
+  fi
+fi
+
 # --- MCP 서버 등록 ---
 if command -v jq >/dev/null 2>&1; then
   if python3 -m json.tool "$SETTINGS" 2>/dev/null | grep -q "claude-library-mcp\|claude-library"; then
     echo "  $(msg 'MCP claude-library 이미 존재 — uvx로 업데이트' 'MCP claude-library already exists — updating via uvx')"
   fi
-  jq '.mcpServers["claude-library"] = {
-    "command": "uvx",
-    "args": ["--with", "mcp<2", "claude-library-mcp@latest"],
-    "env": {"LIBRARY_ROOT": ($home + "/claude-library")}
-  }' --arg home "$HOME" "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
+  cp "$SETTINGS" "$SETTINGS.bak"
+  jq --arg home "$HOME" --arg branch "$BRANCH" --arg spec "$KB_SPEC" '
+    .mcpServers["claude-library"].command = "uvx" |
+    .mcpServers["claude-library"].env.LIBRARY_ROOT //= ($home + "/claude-library") |
+    .mcpServers["claude-library"].args = (if $branch == "main" then
+      ["--with", "mcp<2", "claude-library-mcp@latest"] else
+      ["--with", "mcp<2", "--from", $spec, "claude-library-mcp"] end)
+  ' "$SETTINGS" > "$SETTINGS.tmp.$$"
+  mv "$SETTINGS.tmp.$$" "$SETTINGS"
+  printf '%s\n' "$KB_SPEC" > "$HOME/.claude/hooks/.learnings-kb-spec"
   echo "  $(msg 'MCP 서버 등록: claude-library-mcp (uvx)' 'MCP server registered: claude-library-mcp (uvx)')"
 fi
 
@@ -698,7 +675,8 @@ if command -v jq >/dev/null 2>&1; then
       .permissions.additionalDirectories = ((.permissions.additionalDirectories // []) + [
         ($home + "/claude-library")
       ] | unique)
-    ' "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
+    ' "$SETTINGS" > "$SETTINGS.tmp.$$"
+    mv "$SETTINGS.tmp.$$" "$SETTINGS"
     echo "  $(msg 'library 경로 Write/Edit 권한 등록 (절대경로 + additionalDirectories 포함)' 'Library path Write/Edit permissions registered (with absolute path + additionalDirectories)')"
   fi
 fi

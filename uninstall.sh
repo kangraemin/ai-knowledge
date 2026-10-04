@@ -53,19 +53,20 @@ echo "완료. ~/claude-library/ (지식·결정사항) 는 유지됩니다."
 # 3. decision / 활동로그 훅 제거 (library-sync 유무와 무관하게 독립 처리)
 _lfc_installed=0
 for _h in decision-inject library-activity-log policy-inject library-save-check \
-          code-lesson-check library-allow learnings-update-check library-sync; do
+          code-lesson-check library-allow learnings-update-check library-sync library-autoinject; do
   [ -f "$HOOK_DIR/$_h.sh" ] && _lfc_installed=1
 done
-grep -qE "decision-inject|library-activity-log|library-save-check|code-lesson-check|library-allow|learnings-update-check" "$SETTINGS" 2>/dev/null && _lfc_installed=1
+grep -qE "library-autoinject|decision-inject|library-activity-log|library-save-check|code-lesson-check|library-allow|learnings-update-check" "$SETTINGS" 2>/dev/null && _lfc_installed=1
 if [ "$_lfc_installed" = "1" ]; then
   rm -f "$HOOK_DIR/decision-inject.sh" "$HOOK_DIR/library-activity-log.sh" "$HOOK_DIR/policy-inject.sh" \
         "$HOOK_DIR/library-save-check.sh" "$HOOK_DIR/code-lesson-check.sh" \
         "$HOOK_DIR/library-allow.sh" "$HOOK_DIR/learnings-update-check.sh" \
-        "$HOOK_DIR/library-sync.sh"
+        "$HOOK_DIR/library-sync.sh" "$HOOK_DIR/library-autoinject.sh"
   if command -v jq &>/dev/null && [ -f "$SETTINGS" ]; then
     if jq '
       def strip(re): map(.hooks |= map(select((.command // "") | test(re) | not))) | map(select((.hooks | length) > 0));
       .hooks.SessionStart |= ((. // []) | strip("decision-inject.sh|policy-inject.sh|learnings-update-check.sh"))
+      | .hooks.UserPromptSubmit |= ((. // []) | strip("library-autoinject\\.sh"))
       | .hooks.PostToolUse |= ((. // []) | strip("library-activity-log.sh"))
       | .hooks.PreToolUse  |= ((. // []) | strip("library-allow.sh"))
       | .hooks.Stop        |= ((. // []) | strip("library-save-check.sh|code-lesson-check.sh"))
@@ -105,3 +106,5 @@ PYEOF
   echo "  ~/.claude/CLAUDE.md 의 Library 블록 제거"
 fi
 rm -f "$HOME/.claude/hooks/.learnings-version"
+
+rm -f "$HOOK_DIR/.learnings-kb-spec" "$HOOK_DIR/.learnings-branch" "$HOOK_DIR/.learnings-version-checked"

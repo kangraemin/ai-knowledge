@@ -1,26 +1,64 @@
 #!/bin/bash
 # learnings-for-claude 자동 업데이트 체커
-# Usage: update-check.sh [--force] [--check-only]
+# Usage: update-check.sh [--branch <name>] [--force] [--check-only]
 
 set -euo pipefail
 
+# 브랜치 설정: 명시 옵션은 저장하고 환경변수는 실행 시에만 우선한다.
+BRANCH_FILE="$HOME/.claude/hooks/.learnings-branch"
+BRANCH_OPTION=""
+FORCE=false
+CHECK_ONLY=false
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --branch)
+      [ "$#" -ge 2 ] || { echo "--branch 값이 필요합니다." >&2; exit 1; }
+      BRANCH_OPTION="$2"
+      [[ "$BRANCH_OPTION" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$BRANCH_OPTION" != *..* ]] || { echo "잘못된 브랜치명" >&2; exit 1; }
+      shift 2 ;;
+    --force) FORCE=true; shift ;;
+    --check-only) CHECK_ONLY=true; shift ;;
+    *) echo "알 수 없는 옵션: $1" >&2; exit 1 ;;
+  esac
+done
+BRANCH="${LEARNINGS_BRANCH:-${BRANCH_OPTION:-$(cat "$BRANCH_FILE" 2>/dev/null || echo main)}}"
+[[ "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$BRANCH" != *..* ]] || { echo "잘못된 브랜치명" >&2; exit 1; }
+KB_SPEC="claude-library-mcp"
+if [ "$BRANCH" != main ]; then
+  KB_SPEC="git+https://github.com/kangraemin/learnings-for-claude@$BRANCH#subdirectory=mcp-server"
+fi
+if [ -n "$BRANCH_OPTION" ]; then
+  mkdir -p "$(dirname "$BRANCH_FILE")"
+  if [ "$BRANCH_OPTION" = main ]; then
+    rm -f "$BRANCH_FILE"
+  else
+    printf '%s\n' "$BRANCH_OPTION" > "$BRANCH_FILE"
+  fi
+  rm -f "$HOME/.claude/hooks/.learnings-version-checked"
+fi
+
+
 REPO="kangraemin/learnings-for-claude"
-API_URL="https://api.github.com/repos/$REPO/commits/main"
-RAW_BASE="https://raw.githubusercontent.com/$REPO/main"
+API_URL="https://api.github.com/repos/$REPO/commits/$BRANCH"
 
 HOOK_DIR="$HOME/.claude/hooks"
 VERSION_FILE="$HOOK_DIR/.learnings-version"
 CHECKED_FILE="$HOOK_DIR/.learnings-version-checked"
-SELF="$HOOK_DIR/learnings-update-check.sh"
 
-FORCE=false
-CHECK_ONLY=false
-for arg in "$@"; do
-  case $arg in
-    --force)      FORCE=true ;;
-    --check-only) CHECK_ONLY=true ;;
-  esac
-done
+# 명시적인 브랜치 선택은 MCP 실행 소스도 함께 갱신한다.
+SETTINGS="$HOME/.claude/settings.json"
+if [ -n "$BRANCH_OPTION" ] && [ -f "$SETTINGS" ]; then
+  command -v jq >/dev/null 2>&1 || { echo "브랜치 설정에는 jq가 필요합니다." >&2; exit 1; }
+  cp "$SETTINGS" "$SETTINGS.bak"
+  jq --arg branch "$BRANCH" --arg spec "$KB_SPEC" '
+    .mcpServers["claude-library"].command = "uvx" |
+    .mcpServers["claude-library"].args = (if $branch == "main" then
+      ["--with", "mcp<2", "claude-library-mcp@latest"] else
+      ["--with", "mcp<2", "--from", $spec, "claude-library-mcp"] end)
+  ' "$SETTINGS" > "$SETTINGS.tmp.$$"
+  mv "$SETTINGS.tmp.$$" "$SETTINGS"
+  printf '%s\n' "$KB_SPEC" > "$HOME/.claude/hooks/.learnings-kb-spec"
+fi
 
 # ── 누락 hook 검증 (매 세션) ──────────────────────────────────────────────────
 PYTHON=$(command -v python3 2>/dev/null || command -v python 2>/dev/null || echo python3)
@@ -63,9 +101,17 @@ _ensure_hook "$SETTINGS" "Stop"         "$HOOK_DIR/library-save-check.sh"     10
 
 # 24h throttle
 if [ "$FORCE" = false ] && [ "$CHECK_ONLY" = false ] && [ -f "$CHECKED_FILE" ]; then
-  LAST=$(cat "$CHECKED_FILE" 2>/dev/null || echo 0)
+  CHECKED=$(cat "$CHECKED_FILE" 2>/dev/null || echo 0)
+  # 이전 타임스탬프 단독 형식은 main에만 적용한다.
+  CHECKED_BRANCH=main
+  LAST="$CHECKED"
+  if [[ "$CHECKED" = *@* ]]; then
+    CHECKED_BRANCH="${CHECKED%@*}"
+    LAST="${CHECKED##*@}"
+  fi
   NOW=$(date +%s)
-  if [ $(( NOW - LAST )) -lt 86400 ]; then
+  if [ "$CHECKED_BRANCH" = "$BRANCH" ] && [[ "$LAST" =~ ^[0-9]+$ ]] &&
+     [ "$LAST" -le "$NOW" ] && [ $(( NOW - LAST )) -lt 86400 ]; then
     exit 0
   fi
 fi
@@ -75,31 +121,38 @@ LATEST_SHA=$(curl -sfL --max-time 5 "$API_URL" 2>/dev/null | \
   python3 -c "import json,sys; print(json.load(sys.stdin)['sha'][:7])" 2>/dev/null) || exit 0
 
 # 체크 타임스탬프 갱신
-date +%s > "$CHECKED_FILE"
+printf '%s@%s\n' "$BRANCH" "$(date +%s)" > "$CHECKED_FILE"
 
 INSTALLED_SHA=$(cat "$VERSION_FILE" 2>/dev/null || echo "unknown")
 
+# 구형 SHA만 있는 버전은 main 설치로 해석한다.
+INSTALLED_VERSION="$INSTALLED_SHA"
+[[ "$INSTALLED_VERSION" = *@* ]] || INSTALLED_VERSION="main@$INSTALLED_SHA"
+# git의 core.abbrev 설정이나 구형 전체 SHA와 무관하게 7자리로 비교한다.
+INSTALLED_BRANCH="${INSTALLED_VERSION%@*}"
+INSTALLED_COMMIT="${INSTALLED_VERSION##*@}"
+INSTALLED_VERSION="$INSTALLED_BRANCH@${INSTALLED_COMMIT:0:7}"
+LATEST_VERSION="$BRANCH@$LATEST_SHA"
+
 if [ "$CHECK_ONLY" = true ]; then
   echo "installed: $INSTALLED_SHA"
-  echo "latest:    $LATEST_SHA"
-  [ "$LATEST_SHA" = "$INSTALLED_SHA" ] && echo "status: up-to-date" || echo "status: update-available"
+  echo "latest:    $LATEST_VERSION"
+  [ "$LATEST_VERSION" = "$INSTALLED_VERSION" ] && echo "status: up-to-date" || echo "status: update-available"
   exit 0
 fi
 
-[ "$LATEST_SHA" = "$INSTALLED_SHA" ] && exit 0
+[ "$LATEST_VERSION" = "$INSTALLED_VERSION" ] && exit 0
 
 # 자기 자신을 원격에서 받아 덮어쓰고 exec 하던 부트스트랩은 제거했다.
 # 검증이 `bash -n`(문법)뿐이라 레포가 한 번 털리면 설치된 전 사용자에게
 # 매 세션 임의 코드 실행이 된다. 자기갱신은 update.sh 의 copy_if_changed 가 한다.
 
-# git clone → update.sh 실행
-CLONE_DIR=$(mktemp -d)
-trap 'rm -rf "$CLONE_DIR"' EXIT
-
-git clone --depth 1 "https://github.com/$REPO.git" "$CLONE_DIR/learnings-for-claude" -q 2>/dev/null || exit 0
-
-if [ "${LEARNINGS_AUTO_UPDATE:-0}" = "1" ] || [ "${1:-}" = "--force" ]; then
-  bash "$CLONE_DIR/learnings-for-claude/update.sh" || exit 0
+if [ "${LEARNINGS_AUTO_UPDATE:-0}" = "1" ] || [ "$FORCE" = true ]; then
+  # 적용할 때만 선택한 브랜치를 받는다.
+  CLONE_DIR=$(mktemp -d)
+  trap 'rm -rf "$CLONE_DIR"' EXIT
+  git clone --depth 1 -b "$BRANCH" "https://github.com/$REPO.git" "$CLONE_DIR/learnings-for-claude" -q 2>/dev/null || exit 0
+  LEARNINGS_BRANCH="$BRANCH" bash "$CLONE_DIR/learnings-for-claude/update.sh" || exit 0
 else
   # 동의 없이 사용자 파일을 건드리지 않는다. 알림만 하고 실행은 사용자가 고른다.
   echo "learnings-for-claude 새 버전 있음: $INSTALLED_SHA → $LATEST_SHA"

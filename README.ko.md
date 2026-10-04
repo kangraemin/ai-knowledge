@@ -248,6 +248,20 @@ Claude는 좋은 사고 파트너입니다. 그런데 매 세션이 제로에서
 
 ---
 
+### 업데이트 브랜치 선택
+
+```bash
+bash install.sh --branch feat/pg-multiuser-kb
+bash update.sh --branch feat/pg-multiuser-kb
+bash "$HOME/.claude/hooks/learnings-update-check.sh" --branch feat/pg-multiuser-kb --check-only
+bash "$HOME/.claude/hooks/learnings-update-check.sh" --force
+bash update.sh --branch main
+```
+
+브랜치는 `~/.claude/hooks/.learnings-branch`에 저장되며 `LEARNINGS_BRANCH`가 실행 시 우선합니다. `--branch main`은 파일을 삭제합니다. main 외 브랜치는 MCP도 같은 Git 브랜치에서 실행하고, main 복귀 시 PyPI로 복원합니다. 설정 백업은 `settings.json.bak`에 남습니다. 자동 검사는 기본 알림만 하며 `LEARNINGS_AUTO_UPDATE=1`이면 적용합니다.
+
+설치 시 `library-autoinject.sh`를 `UserPromptSubmit`에 timeout 5초로 등록합니다. `LIBRARY_AUTOINJECT=0`으로 검색 결과 자동 주입을 끌 수 있습니다.
+
 ## 라이선스
 
 MIT

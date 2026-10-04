@@ -248,6 +248,20 @@ This shifts the memory from you to the system.
 
 ---
 
+### Track an update branch
+
+```bash
+bash install.sh --branch feat/pg-multiuser-kb
+bash update.sh --branch feat/pg-multiuser-kb
+bash "$HOME/.claude/hooks/learnings-update-check.sh" --branch feat/pg-multiuser-kb --check-only
+bash "$HOME/.claude/hooks/learnings-update-check.sh" --force
+bash update.sh --branch main
+```
+
+The branch is stored in `~/.claude/hooks/.learnings-branch`; `LEARNINGS_BRANCH` overrides it for the current run. `--branch main` removes that file. Non-main branches run the MCP server from the same Git branch; main restores PyPI. Settings are backed up to `settings.json.bak`. Automatic checks only notify unless `LEARNINGS_AUTO_UPDATE=1` is set.
+
+The installer registers `library-autoinject.sh` on `UserPromptSubmit` with a 5-second timeout. Set `LIBRARY_AUTOINJECT=0` to disable automatic search context.
+
 ## License
 
 MIT
