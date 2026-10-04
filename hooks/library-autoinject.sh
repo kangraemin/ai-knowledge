@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # 프롬프트를 막지 않는 선택적 검색 주입. macOS에서도 subprocess timeout을 사용한다.
 python3 -c '
-import json, os, shlex, shutil, signal, subprocess, sys, time
+import hashlib, json, os, shlex, shutil, signal, subprocess, sys, time
 from datetime import datetime, timezone
 from pathlib import Path
 started = time.monotonic()
 payload = {}
 prompt = ""
 def skip(reason):
-    if os.environ.get("LIBRARY_LOG") == "0":
+    if os.environ.get("LIBRARY_LOG") == "0" or os.environ.get("LIBRARY_USAGE_LOG") == "off":
         return
     try:
         import fcntl
@@ -19,6 +19,9 @@ def skip(reason):
                  "backend": os.environ.get("LIBRARY_BACKEND", "files"), "query": prompt,
                  "results": [], "injected": False, "skipped_reason": reason,
                  "latency_ms": (time.monotonic() - started) * 1000}
+        if os.environ.get("LIBRARY_USAGE_LOG", "aggregate") != "full":
+            value = str(event.pop("query"))
+            event.update(query_sha256=hashlib.sha256(value.encode()).hexdigest()[:16], query_len=len(value))
         if payload.get("session_id"):
             event["session_id"] = payload["session_id"]
         with (root / ("search-" + now.strftime("%Y-%m") + ".jsonl")).open("a") as stream:
@@ -33,6 +36,12 @@ try:
         skip("invalid_payload")
         sys.exit(0)
     prompt = payload.get("prompt", "")
+    origin = payload.get("origin")
+    if ((isinstance(prompt, str) and ("<task-notification>" in prompt or prompt.lstrip().startswith("<system-reminder>")))
+        or ("origin" in payload and (not isinstance(origin, dict) or origin.get("kind") != "human"))
+        or ("turnOrigin" in payload and payload["turnOrigin"] != "human")):
+        skip("system")
+        sys.exit(0)
     if os.environ.get("LIBRARY_AUTOINJECT") == "0":
         skip("disabled")
         sys.exit(0)
@@ -52,7 +61,7 @@ try:
             skip("unavailable")
             sys.exit(0)
         command = ["uvx", "--with", "mcp<2", "--from", spec, "claude-library-kb"]
-    # Kill the whole process group: uvx or a wrapper can spawn child processes.
+    # 래퍼가 만든 자식까지 함께 종료한다.
     process = subprocess.Popen(
         command + ["search", "--format", "inject", "--budget", "1500", "--", prompt],
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True,

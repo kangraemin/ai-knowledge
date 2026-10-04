@@ -157,7 +157,7 @@ def test_concurrent_append_is_complete(tmp_path):
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(lambda i: activity.append({"source":"cli", "query":str(i)}, tmp_path), range(80)))
     assert len(events(tmp_path)) == 80
-    assert len({e["query"] for e in events(tmp_path)}) == 80
+    assert len({e["query_sha256"] for e in events(tmp_path)}) == 80
 
 
 def test_threshold_boundary_and_budget_rows(monkeypatch):

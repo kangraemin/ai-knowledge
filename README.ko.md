@@ -270,6 +270,29 @@ User-scope MCP 서버의 공식 저장 위치는 `~/.claude.json`입니다([공�
 
 `~/.claude/CLAUDE.md`의 설치 규칙은 `<!-- learnings-for-claude:rules start -->`와 `<!-- learnings-for-claude:rules end -->`로 감쌉니다. 목차는 마커 밖의 사용자 영역입니다. 업데이트는 관리 블록만 교체하고 `.bak`을 남깁니다. 기존 무마커 파일은 보존하고 새 템플릿을 `CLAUDE.md.library-rules.new`에 저장합니다. 새 템플릿을 수동 병합할 때 기존 목차와 자체 규칙은 마커 밖에 유지하세요. 마커 누락·역순·중복은 경고 후 무변경 처리합니다. 제거 시 관리 블록만 삭제하여 목차를 보존하며, 기존 무마커 제거도 지원합니다.
 
-PreCompact는 user/assistant 대화의 증분 발췌를 로컬에 보관하고, 다음 Stop에서 기존 20회 주기보다 우선하여 백그라운드 세션 리뷰를 지시합니다. 압축을 차단하지 않습니다. 대기 발췌는 다음 Stop까지 보관하며 리뷰 발췌는 리뷰어가 삭제합니다. install/update는 라이브러리 `.gitignore`에 `.activity/search-*.jsonl`을 중복 없이 추가합니다. 검색 로그에는 프롬프트 원문이 들어가며, 이미 추적된 파일은 변경하지 않습니다.
+PreCompact는 user/assistant 대화의 증분 발췌를 로컬에 보관하고, 다음 Stop에서 기존 20회 주기보다 우선하여 백그라운드 세션 리뷰를 지시합니다. 압축을 차단하지 않습니다. 대기 발췌는 다음 Stop까지 보관하며 리뷰 발췌는 리뷰어가 삭제합니다. install/update는 라이브러리 `.gitignore`에 `.activity/search-*.jsonl`을 중복 없이 추가합니다. 검색 로그는 기본 aggregate 모드에서 해시·길이만, full 모드에서 원문을 저장합니다. 이미 추적된 파일은 변경하지 않습니다.
 
 [공식 PreCompact 계약](https://code.claude.com/docs/en/hooks#precompact): 공통 입력과 `trigger` (`manual`/`auto`), `custom_instructions`를 받습니다. exit 2 또는 `decision: block`으로 압축 차단은 가능하지만 `systemMessage`와 `continue`는 폐기되며 `additionalContext` 주입은 지원하지 않아 다음 Stop에서 리뷰합니다.
+
+### 정책 문서 변경 이력 검사
+
+`policy-changelog-check.sh`는 SessionStart에서 정책 원문·SHA-256·이력 항목 수를 `~/.claude/hooks/.policy-snapshots/<session_id>.json`에 저장하고 Stop에서 비교합니다. 대상은 `~/.claude/CLAUDE.md`, `~/.claude/rules/*.md`, `~/claude-library/GUIDE.md`, `TAXONOMY.md`, `decisions/**/*.md`입니다(`index.md`와 이력 사이드카 제외, `DECISIONS-GUIDE.md` 포함). 일반 문서는 끝의 `## 변경 이력`에, 주입형 문서는 `decisions/_global/changelog/claude-md.md` 또는 `rules-X.md` 사이드카에 기록합니다. 사이드카는 `type: Changelog`인 OKF 문서입니다.
+
+```text
+- YYYY-MM-DD · codex · 무엇을 바꿨나 · 이유: 왜 · 근거: session:<id 또는 날짜/주제>
+```
+
+actor는 `human:kangraemin`, `claude-code/<model>`, `codex`, `process:<스크립트명>`이며 근거는 `commit:SHA`, `session:...`, 문서 경로를 사용합니다. 이유가 확인되지 않으면 `이유: 사후 기록 — 이유 미확인`으로 남깁니다. 이력은 최신 항목을 아래에 추가합니다. CLAUDE.md의 `### 목차` 아래에서 다음 제목·마커 전까지의 줄만 바뀌면 면제합니다. CATALOG.md는 대상이 아닙니다.
+
+이력 없는 변경은 두 번까지 차단하고, 세 번째부터 경고만 표시합니다. 이력 추가 시 카운터가 초기화됩니다. `stop_hook_active: true`도 검사합니다. `POLICY_CHANGELOG_ENFORCE=0`이면 비활성화하며 세션 중간 설치로 스냅샷이 없으면 검사하지 않습니다. 7일 지난 스냅샷은 삭제합니다. update.sh는 실제 관리 블록·GUIDE·TAXONOMY 변경에만 `process:update.sh` 이력을 추가하고 기존 이력을 보존합니다. 사용자가 수정한 문서는 기존처럼 `.new`로 제시합니다.
+
+[공식 hooks 계약](https://code.claude.com/docs/en/hooks): stdin JSON의 `session_id`와 `hook_event_name`으로 이벤트를 구분합니다. SessionStart는 `source`를 추가로 받으며, Stop은 `stop_hook_active`를 받습니다. 종료 차단은 exit 0과 `{"decision":"block","reason":"..."}` 출력으로, 경고는 decision 없는 `systemMessage`로 전달합니다. 사용량 로거 `library-usage-log.sh`는 별도의 Stop 훅으로 `async: true`, timeout 30초에 등록합니다. install/update 재실행 시 중복을 제거하며 uninstall은 두 훅과 검사 런타임을 제거합니다.
+
+### 사용자 프로필
+
+`bash install.sh --profile user`가 기본값입니다. `update.sh --profile user|maintainer`로 전환할 수 있습니다. 선택은 `~/.claude/hooks/.learnings-profile`에 저장하며 `user` 선택 시 파일을 삭제합니다. `LEARNINGS_PROFILE` 환경변수가 저장값·옵션보다 우선하며 실행 중에만 적용됩니다.
+
+- `user`: 사용량은 기본 `aggregate`로 기록합니다. 프롬프트·검색어 대신 SHA-256 앞 16자와 길이를 저장하며 정책 변경이력 검사 hook은 설치·등록하지 않습니다. 업데이트 시 기존 등록도 제거합니다.
+- `maintainer`: 기본 `full`로 원문을 기록하고 정책 변경이력 검사 hook을 설치·등록합니다.
+
+`LIBRARY_USAGE_LOG=off|aggregate|full` 환경변수로 언제든 변경할 수 있습니다. 설치기는 `settings.json`의 `env.LIBRARY_USAGE_LOG`에 기본값을 기록하고 별도 관리 표식으로 마지막 기록값을 추적합니다. 직접 변경한 값은 보존합니다(관리값과 동일한 값으로 다시 설정한 경우는 구분할 수 없습니다). `off`는 검색·턴 로깅을 끕니다. aggregate 보고서는 누락 턴의 해시·길이만 표시합니다. 같은 세션의 같은 사람 프롬프트 UUID는 한 번만 기록하며 이후 Stop 호출은 건너뜁니다.

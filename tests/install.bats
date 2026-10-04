@@ -10,7 +10,7 @@ setup() {
   export SETTINGS="$CLAUDE_DIR/settings.json"
   export INSTALL_SH="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/install.sh"
 
-  unset LEARNINGS_BRANCH LEARNINGS_AUTO_UPDATE LIBRARY_KB_CMD LIBRARY_AUTOINJECT KB_SLEEP KB_FAIL
+  unset LEARNINGS_PROFILE LIBRARY_USAGE_LOG LEARNINGS_BRANCH LEARNINGS_AUTO_UPDATE LIBRARY_KB_CMD LIBRARY_AUTOINJECT KB_SLEEP KB_FAIL
   export ORIG_TEST_PATH="$PATH"
   export REPO_DIR="$(dirname "$INSTALL_SH")"
   # 네트워크와 실제 홈에 의존하지 않는 소스 복제본.
@@ -1327,4 +1327,203 @@ compact_transcript() {
   bash "$TEST_HOME/uninstall.sh" "$TEST_HOME" <<< n
   [ "$(jq -r '.hooks.PreCompact[].hooks[].command' "$SETTINGS")" = custom-hook ]
   [ ! -f "$CLAUDE_DIR/hooks/library-save-check.sh" ]
+}
+
+# ─── 정책 변경 이력 ─────────────────────────────────────────────
+policy_event() {
+  printf '{"session_id":"policy-test","hook_event_name":"%s","stop_hook_active":true}\n' "$1" |
+    bash "$SOURCE_DIR/hooks/policy-changelog-check.sh"
+}
+policy_fixture() {
+  mkdir -p "$LIB_DIR" "$CLAUDE_DIR/rules"
+  printf '# 규칙\n### 목차\n- old\n## 실제 정책\n기존 정책\n' > "$CLAUDE_DIR/CLAUDE.md"
+  printf '# 가이드\n기존 정책\n' > "$LIB_DIR/GUIDE.md"
+  policy_event SessionStart
+}
+policy_entry() {
+  printf '\n## 변경 이력\n- 2026-10-05 · codex · 규칙 수정 · 이유: 테스트 · 근거: session:policy-test\n' >> "$1"
+}
+
+@test "TC-109: policy snapshot contains hashes original text and history counts" {
+  policy_fixture
+  jq -e --arg p "$CLAUDE_DIR/CLAUDE.md" '.files[$p] | (.sha256 | length == 64) and (.content | contains("### 목차")) and .count == 0' "$CLAUDE_DIR/hooks/.policy-snapshots/policy-test.json"
+}
+
+@test "TC-110: policy change without history blocks with actionable paths" {
+  policy_fixture
+  echo changed >> "$LIB_DIR/GUIDE.md"
+  run policy_event Stop
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -e --arg p "$LIB_DIR/GUIDE.md" '.decision == "block" and (.reason | contains($p)) and (.reason | contains("근거: session:"))'
+}
+
+@test "TC-111: appended history passes then a subsequent unlogged change blocks" {
+  policy_fixture
+  echo changed >> "$LIB_DIR/GUIDE.md"
+  policy_entry "$LIB_DIR/GUIDE.md"
+  [ -z "$(policy_event Stop)" ]
+  echo another >> "$LIB_DIR/GUIDE.md"
+  policy_event Stop | jq -e '.decision == "block"'
+}
+
+@test "TC-112: only CLAUDE table of contents changes are exempt" {
+  policy_fixture
+  sed 's/- old/- new/' "$CLAUDE_DIR/CLAUDE.md" > "$TEST_HOME/new"
+  mv "$TEST_HOME/new" "$CLAUDE_DIR/CLAUDE.md"
+  [ -z "$(policy_event Stop)" ]
+  echo '실제 규칙 변경' >> "$CLAUDE_DIR/CLAUDE.md"
+  policy_event Stop | jq -e '.decision == "block" and (.reason | contains("claude-md.md"))'
+}
+
+@test "TC-113: third Stop warns even with stop_hook_active true and history resets counter" {
+  policy_fixture
+  echo changed >> "$LIB_DIR/GUIDE.md"
+  policy_event Stop | jq -e '.decision == "block"'
+  policy_event Stop | jq -e '.decision == "block"'
+  policy_event Stop | jq -e 'has("decision") | not'
+  policy_entry "$LIB_DIR/GUIDE.md"
+  [ -z "$(policy_event Stop)" ]
+  echo new >> "$LIB_DIR/GUIDE.md"
+  policy_event Stop | jq -e '.decision == "block"'
+}
+
+@test "TC-114: env off disables snapshot and Stop enforcement" {
+  export POLICY_CHANGELOG_ENFORCE=0
+  policy_fixture
+  [ ! -f "$CLAUDE_DIR/hooks/.policy-snapshots/policy-test.json" ]
+  [ -z "$(policy_event Stop)" ]
+}
+
+@test "TC-115: Stop without snapshot does nothing" {
+  echo changed > "$CLAUDE_DIR/CLAUDE.md"
+  [ -z "$(policy_event Stop)" ]
+}
+
+@test "TC-116: rules use sidecars and new decisions require inline history" {
+  policy_fixture
+  echo rule > "$CLAUDE_DIR/rules/custom.md"
+  policy_event Stop | jq -e '.decision == "block" and (.reason | contains("rules-custom.md"))'
+  mkdir -p "$LIB_DIR/decisions/_global/changelog"
+  policy_entry "$LIB_DIR/decisions/_global/changelog/rules-custom.md"
+  [ -z "$(policy_event Stop)" ]
+  mkdir -p "$LIB_DIR/decisions/demo/process"
+  echo decision > "$LIB_DIR/decisions/demo/process/test.md"
+  policy_event Stop | jq -e '.decision == "block"'
+  policy_entry "$LIB_DIR/decisions/demo/process/test.md"
+  [ -z "$(policy_event Stop)" ]
+}
+
+@test "TC-117: repeated SessionStart preserves baseline and removes stale snapshots" {
+  policy_fixture
+  cp "$CLAUDE_DIR/hooks/.policy-snapshots/policy-test.json" "$CLAUDE_DIR/hooks/.policy-snapshots/stale.json"
+  touch -t 200001010000 "$CLAUDE_DIR/hooks/.policy-snapshots/stale.json"
+  echo changed >> "$LIB_DIR/GUIDE.md"
+  policy_event SessionStart
+  [ ! -f "$CLAUDE_DIR/hooks/.policy-snapshots/stale.json" ]
+  policy_event Stop | jq -e '.decision == "block"'
+}
+
+@test "TC-118: install update register policy and async usage exactly once and uninstall removes them" {
+  [ -f "$SOURCE_DIR/hooks/library-usage-log.sh" ] || printf '#!/bin/bash\nexit 0\n' > "$SOURCE_DIR/hooks/library-usage-log.sh"
+  install_with_input 1 --profile maintainer
+  install_with_input 1 --profile maintainer
+  bash "$SOURCE_DIR/update.sh"
+  bash "$SOURCE_DIR/update.sh"
+  [ -x "$CLAUDE_DIR/hooks/policy-changelog-check.sh" ]
+  [ -f "$CLAUDE_DIR/hooks/policy-changelog.py" ]
+  [ -x "$CLAUDE_DIR/hooks/library-usage-log.sh" ]
+  jq -e '
+    ([.hooks.SessionStart[].hooks[] | select(.command | endswith("policy-changelog-check.sh"))] | length == 1) and
+    ([.hooks.Stop[].hooks[] | select(.command | endswith("policy-changelog-check.sh"))] | length == 1) and
+    ([.hooks.Stop[].hooks[] | select(.command | endswith("library-usage-log.sh"))] | length == 1 and .[0].async == true and .[0].timeout == 30)
+  ' "$SETTINGS"
+  sed 's|</dev/tty||g' "$SOURCE_DIR/uninstall.sh" > "$TEST_HOME/uninstall.sh"
+  bash "$TEST_HOME/uninstall.sh" "$TEST_HOME" <<< n
+  [ ! -e "$CLAUDE_DIR/hooks/policy-changelog-check.sh" ]
+  [ ! -e "$CLAUDE_DIR/hooks/policy-changelog.py" ]
+  [ ! -e "$CLAUDE_DIR/hooks/library-usage-log.sh" ]
+  ! grep -qE 'policy-changelog|library-usage-log' "$SETTINGS"
+}
+
+@test "TC-119: update appends history only on actual managed policy changes and preserves old entries" {
+  install_with_input 1
+  cp "$LIB_DIR/GUIDE.md" "$LIB_DIR/GUIDE.md.orig"
+  cp "$LIB_DIR/TAXONOMY.md" "$LIB_DIR/TAXONOMY.md.orig"
+  echo '새 가이드 규칙' >> "$SOURCE_DIR/GUIDE.md"
+  echo '새 분류 규칙' >> "$SOURCE_DIR/TAXONOMY.md"
+  sed 's/<!-- learnings-for-claude:rules end -->/새 관리 규칙\n<!-- learnings-for-claude:rules end -->/' "$SOURCE_DIR/templates/claude-rules.md" > "$TEST_HOME/rules"
+  mv "$TEST_HOME/rules" "$SOURCE_DIR/templates/claude-rules.md"
+  bash "$SOURCE_DIR/update.sh"
+  for doc in "$LIB_DIR/GUIDE.md" "$LIB_DIR/TAXONOMY.md" "$LIB_DIR/decisions/_global/changelog/claude-md.md"; do
+    [ "$(grep -c '· process:update.sh ·' "$doc")" -eq 1 ]
+    grep -q '이유: learnings-for-claude main@.* 템플릿 갱신' "$doc"
+    cp "$doc" "$doc.test-copy"
+  done
+  bash "$SOURCE_DIR/update.sh"
+  for doc in "$LIB_DIR/GUIDE.md" "$LIB_DIR/TAXONOMY.md" "$LIB_DIR/decisions/_global/changelog/claude-md.md"; do
+    cmp "$doc" "$doc.test-copy"
+  done
+  echo '다음 가이드 규칙' >> "$SOURCE_DIR/GUIDE.md"
+  bash "$SOURCE_DIR/update.sh"
+  [ "$(grep -c '· process:update.sh ·' "$LIB_DIR/GUIDE.md")" -eq 2 ]
+  grep -qF -- "$(grep '· process:update.sh ·' "$LIB_DIR/GUIDE.md.test-copy")" "$LIB_DIR/GUIDE.md"
+}
+
+@test "TC-120: history examples in code fences or later sections do not satisfy the gate" {
+  policy_fixture
+  cat >> "$LIB_DIR/GUIDE.md" <<'DOC'
+```markdown
+## 변경 이력
+- 2026-10-05 · codex · 예시 · 이유: 예시 · 근거: session:example
+```
+## 변경 이력
+## 다른 섹션
+- 2026-10-05 · codex · 예시 · 이유: 예시 · 근거: session:example
+DOC
+  policy_event Stop | jq -e '.decision == "block"'
+}
+
+@test "profile defaults user and switches maintainer back to user" {
+  install_with_input 1
+  jq -e '.env.LIBRARY_USAGE_LOG == "aggregate"' "$SETTINGS"
+  ! grep -q 'policy-changelog-check' "$SETTINGS"
+  [ ! -f "$CLAUDE_DIR/hooks/policy-changelog-check.sh" ]
+  bash "$SOURCE_DIR/update.sh" --profile maintainer
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-profile")" = maintainer ]
+  jq -e '.env.LIBRARY_USAGE_LOG == "full"' "$SETTINGS"
+  grep -q 'policy-changelog-check' "$SETTINGS"
+  bash "$SOURCE_DIR/update.sh" --profile user
+  [ ! -f "$CLAUDE_DIR/hooks/.learnings-profile" ]
+  [ ! -f "$CLAUDE_DIR/hooks/policy-changelog-check.sh" ]
+  ! grep -q 'policy-changelog-check' "$SETTINGS"
+  jq -e '.env.LIBRARY_USAGE_LOG == "aggregate"' "$SETTINGS"
+}
+
+@test "profile validates option stored value and environment with env precedence" {
+  run bash "$SOURCE_DIR/install.sh" --profile invalid
+  [ "$status" -ne 0 ]
+  run bash "$SOURCE_DIR/update.sh" --profile
+  [ "$status" -ne 0 ]
+  echo invalid > "$CLAUDE_DIR/hooks/.learnings-profile"
+  run bash "$SOURCE_DIR/update.sh"
+  [ "$status" -ne 0 ]
+  LEARNINGS_PROFILE=user install_with_input 1 --profile maintainer
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-profile")" = maintainer ]
+  jq -e '.env.LIBRARY_USAGE_LOG == "aggregate"' "$SETTINGS"
+  LEARNINGS_PROFILE=maintainer bash "$SOURCE_DIR/update.sh" --profile user
+  [ ! -e "$CLAUDE_DIR/hooks/.learnings-profile" ]
+  jq -e '.env.LIBRARY_USAGE_LOG == "full"' "$SETTINGS"
+}
+
+@test "profile preserves custom usage mode and uninstall removes markers" {
+  jq '.env.LIBRARY_USAGE_LOG="off"' "$SETTINGS" > "$SETTINGS.new"
+  mv "$SETTINGS.new" "$SETTINGS"
+  install_with_input 1 --profile maintainer
+  jq -e '.env.LIBRARY_USAGE_LOG == "off"' "$SETTINGS"
+  bash "$SOURCE_DIR/update.sh" --profile user
+  jq -e '.env.LIBRARY_USAGE_LOG == "off"' "$SETTINGS"
+  sed 's|</dev/tty||g' "$SOURCE_DIR/uninstall.sh" > "$TEST_HOME/remove.sh"
+  bash "$TEST_HOME/remove.sh" "$TEST_HOME" < /dev/null
+  [ ! -e "$CLAUDE_DIR/hooks/.learnings-profile" ]
+  [ ! -e "$CLAUDE_DIR/hooks/.learnings-usage-log" ]
 }

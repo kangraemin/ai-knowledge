@@ -4,8 +4,15 @@ set -e
 # 브랜치 설정: 명시 옵션은 저장하고 환경변수는 실행 시에만 우선한다.
 BRANCH_FILE="$HOME/.claude/hooks/.learnings-branch"
 BRANCH_OPTION=""
+PROFILE_FILE="$HOME/.claude/hooks/.learnings-profile"
+PROFILE_OPTION=""
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --profile)
+      [ "$#" -ge 2 ] || { echo "--profile 값이 필요합니다." >&2; exit 1; }
+      PROFILE_OPTION="$2"
+      case "$PROFILE_OPTION" in user|maintainer) ;; *) echo "잘못된 프로필" >&2; exit 1 ;; esac
+      shift 2 ;;
     --branch)
       [ "$#" -ge 2 ] || { echo "--branch 값이 필요합니다." >&2; exit 1; }
       BRANCH_OPTION="$2"
@@ -16,6 +23,16 @@ while [ "$#" -gt 0 ]; do
 done
 BRANCH="${LEARNINGS_BRANCH:-${BRANCH_OPTION:-$(cat "$BRANCH_FILE" 2>/dev/null || echo main)}}"
 [[ "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$BRANCH" != *..* ]] || { echo "잘못된 브랜치명" >&2; exit 1; }
+PROFILE="${LEARNINGS_PROFILE:-${PROFILE_OPTION:-$(cat "$PROFILE_FILE" 2>/dev/null || echo user)}}"
+case "$PROFILE" in user|maintainer) ;; *) echo "잘못된 프로필" >&2; exit 1 ;; esac
+if [ -n "$PROFILE_OPTION" ]; then
+  mkdir -p "$(dirname "$PROFILE_FILE")"
+  if [ "$PROFILE_OPTION" = user ]; then
+    rm -f "$PROFILE_FILE"
+  else
+    printf '%s\n' "$PROFILE_OPTION" > "$PROFILE_FILE"
+  fi
+fi
 KB_SPEC="claude-library-mcp"
 if [ "$BRANCH" != main ]; then
   KB_SPEC="git+https://github.com/kangraemin/learnings-for-claude@$BRANCH#subdirectory=mcp-server"
@@ -402,6 +419,55 @@ else
 
   echo "  $(msg 'Stop 훅 등록: library-save-check.sh' 'Stop hook registered: library-save-check.sh')"
 fi
+
+# 정책 검사 런타임과 사용량 로거 배치
+if [ "$PROFILE" = user ]; then
+  rm -f "$HOME/.claude/hooks/policy-changelog-check.sh" "$HOME/.claude/hooks/policy-changelog.py"
+fi
+for hook in policy-changelog-check.sh policy-changelog.py library-usage-log.sh; do
+  if [ "$PROFILE" = user ] && [ "$hook" != library-usage-log.sh ]; then continue; fi
+  if [ -f "$SCRIPT_DIR/hooks/$hook" ]; then
+    mkdir -p "$HOME/.claude/hooks"
+    cp "$SCRIPT_DIR/hooks/$hook" "$HOME/.claude/hooks/$hook"
+    chmod +x "$HOME/.claude/hooks/$hook"
+  fi
+done
+
+# 정책 이력 검사와 턴 사용량 기록: 기존 등록을 정규화해 중복을 없앤다.
+if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
+  jq --arg profile "$PROFILE" --arg policy "$HOME/.claude/hooks/policy-changelog-check.sh" \
+     --arg usage "$HOME/.claude/hooks/library-usage-log.sh" '
+    def strip($cmd): map(.hooks |= map(select(.command != $cmd))) | map(select(.hooks | length > 0));
+    .hooks.SessionStart = (((.hooks.SessionStart // []) | strip($policy)) +
+      (if $profile == "maintainer" then [{hooks: [{type: "command", command: $policy, timeout: 30}]}] else [] end)) |
+    .hooks.Stop = (((.hooks.Stop // []) | strip($policy) | strip($usage)) +
+      (if $profile == "maintainer" then [{hooks: [{type: "command", command: $policy, timeout: 30}]}] else [] end) +
+      [{hooks: [{type: "command", command: $usage, async: true, timeout: 30}]}])
+  ' "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
+fi
+
+# 마지막 관리값과 같을 때만 프로필 기본값을 갱신한다.
+python3 - "$SETTINGS" "$PROFILE" <<'PYPROFILE'
+import json, os, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+if path.exists():
+    settings = json.loads(path.read_text())
+    env = settings.setdefault('env', {})
+    marker = path.parent / 'hooks/.learnings-usage-log'
+    previous = marker.read_text().strip() if marker.exists() else None
+    current = env.get('LIBRARY_USAGE_LOG')
+    if current is None or (previous is not None and current == previous):
+        value = 'full' if sys.argv[2] == 'maintainer' else 'aggregate'
+        env['LIBRARY_USAGE_LOG'] = value
+        temporary = path.with_name(path.name + '.profile.tmp')
+        temporary.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + '\n')
+        temporary.replace(path)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(value + '\n')
+    elif marker.exists():
+        marker.unlink()
+PYPROFILE
 
 # PreCompact는 같은 발췌기를 사용하며 다음 Stop에 리뷰를 맡긴다.
 if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then

@@ -270,6 +270,29 @@ User-scope MCP servers are stored in `~/.claude.json` ([official documentation](
 
 Rules installed in `~/.claude/CLAUDE.md` are enclosed by `<!-- learnings-for-claude:rules start -->` and `<!-- learnings-for-claude:rules end -->`. The table of contents stays outside this managed block. Updates replace only the managed block and save a `.bak`. Legacy files without markers are preserved; the new template is written to `CLAUDE.md.library-rules.new` for manual merging. Keep your table of contents and custom rules outside the markers when adopting the new template. Incomplete, reversed, or duplicate markers produce a warning without changing the file. Uninstall removes the managed block while preserving the table of contents; legacy removal remains supported.
 
-PreCompact preserves incremental user/assistant transcript excerpts locally; the next Stop requests the existing background session review before the usual 20-response throttle. It does not block compaction. Pending excerpts remain local until that Stop; review excerpts are deleted by the reviewer. Install/update add `.activity/search-*.jsonl` to the library `.gitignore` without duplicates. Search logs contain raw prompts; already tracked files are left untouched.
+PreCompact preserves incremental user/assistant transcript excerpts locally; the next Stop requests the existing background session review before the usual 20-response throttle. It does not block compaction. Pending excerpts remain local until that Stop; review excerpts are deleted by the reviewer. Install/update add `.activity/search-*.jsonl` to the library `.gitignore` without duplicates. Search logs contain raw prompts only in full mode; aggregate is the default. Already tracked files are left untouched.
 
 [Official PreCompact contract](https://code.claude.com/docs/en/hooks#precompact): common input fields plus `trigger` (`manual`/`auto`) and `custom_instructions`. Exit 2 or `decision: block` can block compaction; `systemMessage` and `continue` are discarded, and `additionalContext` injection is not supported. Hence the deferred Stop review.
+
+### Policy changelog checks
+
+`policy-changelog-check.sh` snapshots policy text, SHA-256 hashes and changelog counts at SessionStart in `~/.claude/hooks/.policy-snapshots/<session_id>.json`, then checks changes at Stop. Policies include `~/.claude/CLAUDE.md`, `~/.claude/rules/*.md`, and `~/claude-library/{GUIDE.md,TAXONOMY.md,decisions/**/*.md}` (including DECISIONS-GUIDE.md, excluding index.md and changelog sidecars). Ordinary policies append entries under their final `## 변경 이력` section. Injected policies use OKF `type: Changelog` sidecars under `decisions/_global/changelog/`: `claude-md.md` or `rules-X.md`.
+
+```text
+- YYYY-MM-DD · codex · what changed · 이유: why · 근거: session:<id or date/topic>
+```
+
+Actors are `human:kangraemin`, `claude-code/<model>`, `codex`, or `process:<script>`. Evidence is `commit:SHA`, `session:...`, or a document path. Use `이유: 사후 기록 — 이유 미확인` when the reason is unverified. Entries are append-only, newest last. Only changed lines within CLAUDE.md's `### 목차` section (up to the next heading or marker) are exempt. CATALOG.md is not a policy.
+
+Missing entries block twice, then produce warnings from the third consecutive check. Adding history resets the counter; `stop_hook_active: true` does not bypass checks. Set `POLICY_CHANGELOG_ENFORCE=0` to disable. A missing snapshot is a no-op, and snapshots older than seven days are removed. update.sh appends `process:update.sh` entries only for actual managed-block, GUIDE or TAXONOMY changes, preserving previous history and offering user-edited documents as `.new` files.
+
+[Official hook contract](https://code.claude.com/docs/en/hooks): stdin JSON supplies `session_id` and `hook_event_name`; SessionStart adds `source`, and Stop adds `stop_hook_active`. Blocking returns exit 0 with `{"decision":"block","reason":"..."}`; warnings use `systemMessage` without a decision. The separate `library-usage-log.sh` Stop hook runs with `async: true` and a 30-second timeout. Install/update deduplicate registrations; uninstall removes both hooks and the policy runtime.
+
+### User profiles
+
+`bash install.sh --profile user` is the default. Switch with `update.sh --profile user|maintainer`. The choice is stored in `~/.claude/hooks/.learnings-profile`; selecting `user` removes that file. `LEARNINGS_PROFILE` overrides the option and stored choice for the current invocation.
+
+- `user`: defaults to `aggregate` usage logging. Prompts and search queries are replaced with the first 16 SHA-256 characters and their length. The policy changelog check hook is not installed or registered; updates remove existing registrations.
+- `maintainer`: defaults to `full` logging of original text and installs/registers the policy changelog check hook.
+
+Override logging at runtime with `LIBRARY_USAGE_LOG=off|aggregate|full`. The installer writes the default to `settings.json` under `env.LIBRARY_USAGE_LOG` and tracks its last managed value in a separate marker. User edits are preserved (setting the same value as the managed value is indistinguishable). `off` disables search and turn logging. Aggregate reports show only hashes and lengths for missed turns. Each human prompt UUID is logged once per session; subsequent Stop calls skip it.

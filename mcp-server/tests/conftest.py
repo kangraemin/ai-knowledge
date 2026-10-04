@@ -11,6 +11,7 @@ def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     monkeypatch.setenv("LIBRARY_ROOT", str(tmp_path / "library"))
     monkeypatch.delenv("LIBRARY_LOG", raising=False)
+    monkeypatch.delenv("LIBRARY_USAGE_LOG", raising=False)
     monkeypatch.delenv("LIBRARY_AUTOINJECT_MIN_SCORE", raising=False)
     monkeypatch.delenv("LIBRARY_SESSION_ID", raising=False)
     monkeypatch.setenv("LIBRARY_EMBED_PROVIDER", "none")

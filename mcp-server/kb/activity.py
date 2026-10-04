@@ -1,5 +1,6 @@
 """검색 관측은 본 동작에 영향을 주지 않는 선택적 부가기능이다."""
 
+import hashlib
 import json
 import math
 import os
@@ -8,16 +9,33 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 
+def mode():
+    value = os.environ.get("LIBRARY_USAGE_LOG", "aggregate")
+    return value if value in ("off", "aggregate", "full") else "aggregate"
+
+
+def digest(value):
+    return hashlib.sha256(value.encode()).hexdigest()[:16]
+
+
+def redact(record, key):
+    if mode() != "full" and key in record:
+        value = str(record.pop(key))
+        record[key + "_sha256"] = digest(value)
+        record[key + "_len"] = len(value)
+    return record
+
+
 def root():
     return Path(os.environ.get("LIBRARY_ROOT", Path.home() / "claude-library"))
 
 
 def append(event, library_root=None):
-    if os.environ.get("LIBRARY_LOG") == "0":
+    if os.environ.get("LIBRARY_LOG") == "0" or mode() == "off":
         return
     try:
         now = datetime.now(timezone.utc)
-        record = {"ts": now.isoformat(), **event}
+        record = redact({"ts": now.isoformat(), **event}, "query")
         session = os.environ.get("LIBRARY_SESSION_ID")
         if session:
             record.setdefault("session_id", session)
@@ -34,14 +52,14 @@ def append(event, library_root=None):
 
 
 def pg_event(conn, action, query=None, doc_id=None):
-    if os.environ.get("LIBRARY_LOG") == "0":
+    if os.environ.get("LIBRARY_LOG") == "0" or mode() == "off":
         return
     try:
         # 실패한 INSERT가 검색 트랜잭션까지 오염시키지 않게 savepoint로 격리한다.
         with conn.transaction():
             conn.execute(
                 "INSERT INTO kb.events(user_id,action,query,doc_id) VALUES(kb.current_user_id(),%s,%s,%s)",
-                (action, query, doc_id),
+                (action, digest(query) if query is not None and mode() != "full" else query, doc_id),
             )
     except Exception:
         pass

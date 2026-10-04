@@ -89,6 +89,14 @@ def parser():
     sub.add_parser("doctor")
     stats_parser = sub.add_parser("stats")
     stats_parser.add_argument("--days", type=int, default=30)
+    usage = sub.add_parser("usage-log")
+    usage.add_argument("--transcript", required=True)
+    usage.add_argument("--session", default="")
+    usage.add_argument("--cwd", default="")
+    report_parser = sub.add_parser("report")
+    report_parser.add_argument("--days", type=int, default=30)
+    report_parser.add_argument("--format", choices=["text", "json", "md"], default="text")
+    report_parser.add_argument("--save", action="store_true")
     s = sub.add_parser("search")
     s.add_argument("query")
     s.add_argument("--format", choices=["text", "inject", "json"], default="text")
@@ -132,7 +140,22 @@ def main(argv=None):
     try:
         from .api import postgres
 
-        if args.command == "stats":
+        if args.command == "usage-log":
+            from .usage import log_usage
+            log_usage(args.transcript, args.session, args.cwd)
+            return 0
+        elif args.command == "report":
+            from .usage import report, render_report
+            result = render_report(report(args.days), args.format)
+            if args.save:
+                if args.format != "md":
+                    raise ValueError("--save는 --format md와 함께 사용하세요")
+                from .activity import root
+                from datetime import date
+                destination = root() / "eval" / f"usage-report-{date.today().isoformat()}.md"
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(result + "\n")
+        elif args.command == "stats":
             from .activity import stats
             result = stats(args.days)
         elif args.command == "search" and not postgres():
