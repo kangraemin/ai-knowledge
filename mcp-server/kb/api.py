@@ -1,6 +1,7 @@
 """MCP와 CLI가 공유하는 백엔드 어댑터."""
 
 import os
+import time
 from .db import connect
 from .markdown import render
 from .search import search, format_results
@@ -15,17 +16,24 @@ def postgres():
 
 
 def search_text(query, **kwargs):
+    from .activity import search_event
+    start = time.monotonic()
     with connect() as conn:
-        return (
-            format_results(search(conn, query, **kwargs))
-            or f"'{query}' 관련 라이브러리 항목 없음."
-        )
+        rows = search(conn, query, **kwargs)
+    search_event(query, rows, "postgres", (time.monotonic() - start) * 1000)
+    return format_results(rows) or f"'{query}' 관련 라이브러리 항목 없음."
 
 
 def read(path):
+    from .activity import append, pg_event
     with connect() as conn:
         doc = store.get_document(conn, path)
-        return render(doc["frontmatter"], doc["body"])
+        pg_event(conn, "read", doc_id=doc["id"])
+        text = render(doc["frontmatter"], doc["body"])
+        if doc["status"] == "deprecated":
+            text = f"(대체됨 → {doc['frontmatter'].get('superseded_by', '')})\n" + text
+    append({"source": "mcp", "action": "read", "path": path})
+    return text
 
 
 def listing(repo=None):

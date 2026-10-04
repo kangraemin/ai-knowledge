@@ -1213,3 +1213,117 @@ PY
   cmp "$TEST_HOME/broken" "$SETTINGS"
   cmp "$TEST_HOME/user-before" "$HOME/.claude.json"
 }
+
+@test "TC-99: install excludes raw search logs without duplicate entries" {
+  install_with_input 1
+  install_with_input 1
+  [ "$(grep -xcF '.activity/search-*.jsonl' "$LIB_DIR/.gitignore")" -eq 1 ]
+  git -C "$LIB_DIR" init -q
+  git -C "$LIB_DIR" check-ignore .activity/search-session.jsonl
+}
+
+@test "TC-100: update supplements existing gitignore and preserves tracked log" {
+  install_with_input 1
+  printf 'custom/' > "$LIB_DIR/.gitignore"
+  mkdir -p "$LIB_DIR/.activity"
+  echo private > "$LIB_DIR/.activity/search-old.jsonl"
+  git -C "$LIB_DIR" init -q
+  git -C "$LIB_DIR" add .activity/search-old.jsonl
+  bash "$SOURCE_DIR/update.sh"
+  bash "$SOURCE_DIR/update.sh"
+  [ "$(grep -xcF '.activity/search-*.jsonl' "$LIB_DIR/.gitignore")" -eq 1 ]
+  grep -qxF 'custom/' "$LIB_DIR/.gitignore"
+  [ "$(git -C "$LIB_DIR" ls-files .activity/search-old.jsonl)" = '.activity/search-old.jsonl' ]
+  [ "$(cat "$LIB_DIR/.activity/search-old.jsonl")" = private ]
+}
+
+@test "TC-101: install and update register PreCompact once and preserve unrelated hooks" {
+  echo '{"hooks":{"PreCompact":[{"hooks":[{"type":"command","command":"custom-hook"}]}]}}' > "$SETTINGS"
+  install_with_input 1
+  install_with_input 1
+  bash "$SOURCE_DIR/update.sh"
+  bash "$SOURCE_DIR/update.sh"
+  [ "$(jq '[.hooks.PreCompact[].hooks[] | select(.command | endswith("library-save-check.sh"))] | length' "$SETTINGS")" -eq 1 ]
+  jq -e '[.hooks.PreCompact[].hooks[].command] | index("custom-hook") != null' "$SETTINGS"
+}
+
+@test "TC-102: update adds PreCompact for existing installations" {
+  install_with_input 1
+  jq 'del(.hooks.PreCompact)' "$SETTINGS" > "$TEST_HOME/settings-new"
+  mv "$TEST_HOME/settings-new" "$SETTINGS"
+  bash "$SOURCE_DIR/update.sh"
+  [ "$(jq '[.hooks.PreCompact[].hooks[]] | length' "$SETTINGS")" -eq 1 ]
+}
+
+# 훅 동작은 설치와 독립적으로 임시 HOME에서 실행한다.
+compact_input() {
+  jq -nc --arg event "$1" --arg path "$TEST_HOME/transcript.jsonl" \
+    '{hook_event_name:$event, session_id:"compact-test", transcript_path:$path}'
+}
+compact_transcript() {
+  printf '%s\n' '{"type":"user","message":{"content":"압축 전 교훈"}}' > "$TEST_HOME/transcript.jsonl"
+}
+
+@test "TC-103: PreCompact emits nothing and next Stop prioritizes preserved excerpt" {
+  compact_transcript
+  local out
+  out=$(compact_input PreCompact | bash "$SOURCE_DIR/hooks/library-save-check.sh")
+  [ -z "$out" ]
+  [ ! -f "$CLAUDE_DIR/hooks/.counters/.library-check-counter-compact-test" ]
+  rm "$TEST_HOME/transcript.jsonl"
+  out=$(compact_input Stop | bash "$SOURCE_DIR/hooks/library-save-check.sh")
+  [ "$(echo "$out" | jq -r .decision)" = block ]
+  echo "$out" | jq -r .reason | grep -q 'run_in_background=true'
+  grep -q '압축 전 교훈' "$CLAUDE_DIR"/hooks/.library-review-excerpt-compact-test-*
+  [ ! -f "$CLAUDE_DIR/hooks/.library-review-pending-compact-test.txt" ]
+  [ -z "$(compact_input Stop | bash "$SOURCE_DIR/hooks/library-save-check.sh")" ]
+}
+
+@test "TC-104: repeated PreCompact accumulates only incremental text" {
+  compact_transcript
+  compact_input PreCompact | bash "$SOURCE_DIR/hooks/library-save-check.sh"
+  echo '{"type":"assistant","message":{"content":[{"type":"text","text":"새 교훈"},{"type":"tool_use","name":"secret-tool"}]}}' >> "$TEST_HOME/transcript.jsonl"
+  compact_input PreCompact | bash "$SOURCE_DIR/hooks/library-save-check.sh"
+  compact_input PreCompact | bash "$SOURCE_DIR/hooks/library-save-check.sh"
+  local pending="$CLAUDE_DIR/hooks/.library-review-pending-compact-test.txt"
+  [ "$(grep -c '압축 전 교훈' "$pending")" -eq 1 ]
+  [ "$(grep -c '새 교훈' "$pending")" -eq 1 ]
+  ! grep -q secret-tool "$pending"
+}
+
+@test "TC-105: pending excerpt survives Stop reentry guard and session isolation" {
+  compact_transcript
+  compact_input PreCompact | bash "$SOURCE_DIR/hooks/library-save-check.sh"
+  [ -z "$(compact_input Stop | jq '.stop_hook_active=true' | bash "$SOURCE_DIR/hooks/library-save-check.sh")" ]
+  [ -z "$(compact_input Stop | jq '.session_id="other-session"' | bash "$SOURCE_DIR/hooks/library-save-check.sh")" ]
+  [ -s "$CLAUDE_DIR/hooks/.library-review-pending-compact-test.txt" ]
+  compact_input Stop | bash "$SOURCE_DIR/hooks/library-save-check.sh" | jq -e '.decision == "block"'
+}
+
+@test "TC-106: empty and missing transcripts produce no pending review" {
+  compact_input PreCompact | bash "$SOURCE_DIR/hooks/library-save-check.sh"
+  printf '%s\n' '{"type":"system"}' 'invalid-json' > "$TEST_HOME/transcript.jsonl"
+  compact_input PreCompact | bash "$SOURCE_DIR/hooks/library-save-check.sh"
+  [ ! -e "$CLAUDE_DIR/hooks/.library-review-pending-compact-test.txt" ]
+  [ -z "$(compact_input Stop | bash "$SOURCE_DIR/hooks/library-save-check.sh")" ]
+}
+
+@test "TC-107: ordinary twentieth Stop still extracts incremental text" {
+  compact_transcript
+  mkdir -p "$CLAUDE_DIR/hooks/.counters"
+  echo 19 > "$CLAUDE_DIR/hooks/.counters/.library-check-counter-compact-test"
+  compact_input Stop | bash "$SOURCE_DIR/hooks/library-save-check.sh" | jq -e '.decision == "block"'
+  grep -q '압축 전 교훈' "$CLAUDE_DIR"/hooks/.library-review-excerpt-compact-test-*
+  echo 39 > "$CLAUDE_DIR/hooks/.counters/.library-check-counter-compact-test"
+  [ -z "$(compact_input Stop | bash "$SOURCE_DIR/hooks/library-save-check.sh")" ]
+}
+
+@test "TC-108: uninstall removes PreCompact registration and preserves custom hook" {
+  install_with_input 1
+  jq '.hooks.PreCompact += [{hooks:[{type:"command",command:"custom-hook"}]}]' "$SETTINGS" > "$TEST_HOME/settings-new"
+  mv "$TEST_HOME/settings-new" "$SETTINGS"
+  sed 's|</dev/tty||g' "$SOURCE_DIR/uninstall.sh" > "$TEST_HOME/uninstall.sh"
+  bash "$TEST_HOME/uninstall.sh" "$TEST_HOME" <<< n
+  [ "$(jq -r '.hooks.PreCompact[].hooks[].command' "$SETTINGS")" = custom-hook ]
+  [ ! -f "$CLAUDE_DIR/hooks/library-save-check.sh" ]
+}

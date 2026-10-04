@@ -22,6 +22,9 @@ def query_terms(query):
     """Normalize prose punctuation/case, common particles and repeated words."""
     terms = re.findall(r"[^\W_]+(?:[._+-][^\W_]+)*", query.lower())
     terms = [_PARTICLES.sub(r"\1", t) for t in terms if t not in _STOPWORDS]
+    # 영문 기술명 뒤의 조사와 자주 쓰는 서술형 어미를 제거한다.
+    terms = [re.sub(r"^([a-z][a-z0-9._+-]*)(?:에서는|에서|으로|은|는|이|가|을|를|의|도)$", r"\1", t) for t in terms]
+    terms = [re.sub(r"^([가-힣]{2,}?)(?:했습니다|합니다|하였다|한다|하는|하기|하면|되는|됩니다|된다)$", r"\1", t) for t in terms]
     return list(dict.fromkeys([t for t in terms if len(t) > 1] or terms))
 
 
@@ -35,6 +38,8 @@ def format_results(rows, token_budget=1500):
             else str(row.get(key) or "").replace("\n", " ")
             for key in ("path", "title", "description")
         )
+        if row.get("superseded_by"):
+            line += " (대체됨 → " + str(row["superseded_by"]) + ")"
         if row.get("supersedes"):
             line += " [대체: " + ", ".join(row["supersedes"]) + "]"
         cost = len((line + "\n").encode())
@@ -124,7 +129,7 @@ def search(
     rows = []
     if ids:
         fetched = conn.execute(
-            """SELECT d.id,d.path,d.title,d.description,d.version,d.scope_id,
+            """SELECT d.id,d.path,d.title,d.description,d.version,d.scope_id,d.body,d.tags,d.frontmatter,
             ARRAY(SELECT target.path FROM kb.relations r JOIN kb.documents target ON target.id=r.dst_id
                   WHERE r.src_id=d.id AND r.type='supersedes' AND r.invalid_at IS NULL) AS supersedes
             FROM kb.documents d WHERE d.id=ANY(%s)""",
@@ -132,10 +137,14 @@ def search(
         ).fetchall()
         by_id = {r["id"]: r for r in fetched}
         rows = [by_id[id] for id in ids if id in by_id]
-    conn.execute(
-        "INSERT INTO kb.events(user_id,action,query) VALUES(kb.current_user_id(),'search',%s)",
-        (query,),
-    )
+    from .relevance import normalized
+    from .activity import pg_event
+    for row in rows:
+        row["score"] = normalized(row, terms)
+        row["superseded_by"] = row.pop("frontmatter").get("superseded_by", "")
+        row.pop("body", None)
+        row.pop("tags", None)
+    pg_event(conn, "search", query=query)
     if token_budget is not None:
         kept = []
         for row in rows:

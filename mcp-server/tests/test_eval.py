@@ -57,6 +57,6 @@ def test_evaluate_never_searches_other_split(tmp_path, monkeypatch):
 
 def test_prose_terms_keep_identifiers_and_remove_duplicate_noise():
     assert query_terms("How can I debug HTTP? http!") == ["debug", "http"]
-    assert query_terms("DB의 백업은?") == ["db의", "백업"]
+    assert query_terms("DB의 백업은?") == ["db", "백업"]
     assert query_terms("pg_bigm v1.2 사과는 사과는") == ["pg_bigm", "v1.2", "사과"]
     assert query_terms("") == []

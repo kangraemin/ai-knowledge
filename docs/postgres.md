@@ -77,7 +77,9 @@ claude-library-kb search '접속 오류' --scope team:default --include-deprecat
 claude-library-kb decisions repository-name
 ```
 
-pg_bigm의 GIN은 LIKE를 지원하므로 키워드 비교는 LIKE/=%를 사용하며 대소문자를 구분한다. 검색은 pg_bigm 청크 후보 50개, 의미 후보 50개를 각각 문서별 최고 청크로 접은 후 RRF(60)로 합친다. 기본 결과 7개는 `path · title · description`이며 본문은 `library_read`로 읽는다. description은 160자까지다. 출력 예산은 UTF-8 바이트 수를 보수적인 토큰 상한으로 사용한다. 짧은 예산에서는 실제 허용 토큰보다 적게 출력될 수 있다. 파일 백엔드의 점수 계산은 기존 그대로다.
+파일·Postgres 키워드 검색은 질의를 소문자·문장부호·중복 단어·일반 조사/어미로 정규화한다. 제목 6, 경로 5, 설명 4, 태그 3, 본문 1의 최대 필드 가중치에 문서 빈도(IDF)와 매칭 단어 수를 반영한다. Postgres는 키워드 50문서와 의미 검색 50청크를 문서 단위로 합쳐 RRF(60)로 정렬한다. `lower()`와 문서 스캔을 사용하므로 기존 GIN을 활용한다고 가정하면 안 된다.
+
+기본 결과 7개는 `path · title · description`이며 본문은 `library_read`로 읽는다. description은 160자까지다. 출력 예산은 UTF-8 바이트 수를 보수적인 토큰 상한으로 사용한다. 양쪽 모두 `status: deprecated` 문서를 기본 검색에서 제외한다. `--include-deprecated`로 검색하거나 `library_read`로 직접 읽을 수 있으며 `superseded_by`가 있으면 `(대체됨 → library/...)`를 표시한다. `library_relate(..., 'supersedes')`도 대상 프론트매터에 두 필드를 함께 저장한다.
 
 새 MCP 툴:
 
@@ -110,6 +112,22 @@ claude-library-kb embed --pending
 
 `hooks/library-autoinject.sh`는 UserPromptSubmit JSON을 읽고 CLI 검색 결과를 additionalContext로 반환한다. 8자 미만, 슬래시 명령, `LIBRARY_AUTOINJECT=0`은 건너뛴다. 실패와 5초 초과는 출력 없이 exit 0이다. `python3`와 PATH의 `claude-library-kb`가 필요하다. 설치 스크립트의 등록은 별도 담당 범위다.
 
+주입에는 별도의 0~1 관련도 점수를 사용한다. 각 질의 단어의 최대 필드 가중치 합 × 매칭 단어 수를 `S`라 할 때 `1-exp(-S/24)`다. 확률이나 RRF 순위 점수는 아니다. 두 백엔드 기본 임계값은 `0.22119921692859515`이며 dev에서 무관 문장 검색 억제율 90% 이상인 최소값으로 선택했다. `LIBRARY_AUTOINJECT_MIN_SCORE`(0~1)로 덮어쓸 수 있다. 임계값 미만 후보는 주입하지 않고 `low_score`, 후보 없음은 `no_results`, 예산 부족은 `budget`으로 기록한다. 의미 검색 전용 후보도 어휘 증거가 없으면 기본 자동주입에서는 제외되며 MCP 검색 자체는 계속 반환한다.
+
+## 검색 관측과 통계
+
+파일·Postgres 공통으로 `$LIBRARY_ROOT/.activity/search-YYYY-MM.jsonl`에 UTC JSONL을 append한다. 검색/주입에는 `ts`, `action`, `source`(`mcp|cli|autoinject`), `backend`, `query`, `results`(path/score), `injected`, `skipped_reason`, `latency_ms`가 들어간다. 읽기는 `ts`, `source`, `action=read`, `path`를 기록한다. 검색·읽기·주입의 Postgres `kb.events` 기록도 유지한다. 파일 쓰기는 flock, DB 관측 INSERT는 savepoint로 격리하며 기록 실패가 검색·읽기를 막지 않는다. `LIBRARY_LOG=0`이면 이 관측 기록을 끈다. 기존 문서 변경 이력 이벤트는 유지된다.
+
+```sh
+claude-library-kb stats --days 30
+LIBRARY_LOG=0 claude-library-kb search '백업 복구'
+LIBRARY_AUTOINJECT_MIN_SCORE=0.3 claude-library-kb search --format inject '백업 복구'
+```
+
+통계는 주입 이벤트 수, 스킵 사유별 횟수, 점수 count/min/p50/p95/max, latency p50/p95를 JSON으로 출력한다. 분위수는 nearest-rank다. inject→read 비율은 **session_id가 있는 주입 문서 노출 건수**를 분모로, 그 이후 같은 세션·경로의 read가 한 번 이상 있는 노출 건수를 분자로 삼는다. 반복 read는 중복 집계하지 않고, 반복 주입은 별도 노출이다. 세션 없는 노출은 총 문서 수에는 포함하지만 비율 분모에서는 제외한다. 지정 기간 안의 이벤트만 연결하므로 기간 경계 이전의 주입은 포함하지 않는다.
+
+hook stdin의 `session_id`는 검색 자식 프로세스로 전달한다. MCP는 hook의 자식이 아니므로 별도 MCP 실행 환경에 동일한 `LIBRARY_SESSION_ID`가 제공된 경우만 read와 연결할 수 있다. 누락된 세션을 추측해 다른 세션과 연결하지 않는다. 로그에는 질의·문서 경로가 들어가므로 공유할 때는 `stats` 집계만 사용한다. hook 스킵·실패 latency는 hook 기준, 정상 검색/주입 latency는 CLI 검색 처리 기준이다.
+
 SessionStart 결정사항 주입의 Python 진입점은 `claude-library-kb decisions <repo>`다. 해당 repo scope의 활성 결정사항 본문을 출력한다.
 
 ## 평가와 테스트
@@ -126,7 +144,7 @@ KB_TEST_DATABASE_URL=postgresql://postgres@127.0.0.1:54329/kb_test \
 uv run --extra postgres --with pytest pytest
 ```
 
-평가셋은 `mcp-server/kb/eval/queries.jsonl`, 측정값은 `results.md`에 있다. 두 백엔드 모두 상위 7개를 사용하므로 MRR은 MRR@7이다. 하나의 관련 문서를 정답으로 지정했다. 실제 라이브러리 원본은 수정하지 않으며 왕복 파일과 모델 캐시는 임시 HOME에 쓴다.
+정답 평가셋은 `$LIBRARY_ROOT/eval/search/queries.jsonl` 또는 `LIBRARY_EVAL_QUERIES`가 지정한 파일이다. 공개 무관 문장 30개는 `mcp-server/kb/eval/negatives.jsonl`, 집계 측정값은 `mcp-server/kb/eval/results.md`에 있다. 두 백엔드 모두 상위 7개를 사용하므로 MRR은 MRR@7이다. 하나의 관련 문서를 정답으로 지정했다. 실제 라이브러리 원본은 수정하지 않으며 왕복 파일과 모델 캐시는 임시 HOME에 쓴다.
 
 ## RDS로 이전
 

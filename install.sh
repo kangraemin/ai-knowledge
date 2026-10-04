@@ -209,6 +209,13 @@ if [ ! -f "$LIB_DIR/.gitignore" ]; then
   printf '# 활동 로그는 로컬 기록 — 매 세션 커밋 대상이 아니다\n.activity/\n' > "$LIB_DIR/.gitignore"
 fi
 
+# 검색 로그에는 프롬프트 원문이 포함되므로 추적 대상에서 제외한다.
+# 기존 추적 파일의 인덱스나 이력은 변경하지 않는다.
+mkdir -p "$LIB_DIR"
+if ! grep -qxF '.activity/search-*.jsonl' "$LIB_DIR/.gitignore" 2>/dev/null; then
+  printf '\n.activity/search-*.jsonl\n' >> "$LIB_DIR/.gitignore"
+fi
+
 echo "  $(msg '~/claude-library/ 생성' '~/claude-library/ created')"
 
 # --- git 설정 ---
@@ -275,6 +282,13 @@ if [ "$NEED_REPO" = true ]; then
     if git clone -q "$repo_url" "$LIB_DIR" 2>/dev/null; then
       [ -f "$LIB_DIR/GUIDE.md" ] || cp "$TMPDIR_INIT/GUIDE.md" "$LIB_DIR/"
       [ -f "$LIB_DIR/LIBRARY.md" ] || cp "$TMPDIR_INIT/LIBRARY.md" "$LIB_DIR/"
+      # 검색 로그에는 프롬프트 원문이 포함되므로 추적 대상에서 제외한다.
+      # 기존 추적 파일의 인덱스나 이력은 변경하지 않는다.
+      mkdir -p "$LIB_DIR"
+      if ! grep -qxF '.activity/search-*.jsonl' "$LIB_DIR/.gitignore" 2>/dev/null; then
+        printf '\n.activity/search-*.jsonl\n' >> "$LIB_DIR/.gitignore"
+      fi
+
       mkdir -p "$LIB_DIR/library"
       [ -f "$LIB_DIR/library/_template.md" ] || cp "$TMPDIR_INIT/library/_template.md" "$LIB_DIR/library/"
       echo "  $(msg '기존 repo clone 완료' 'Cloned existing repo')"
@@ -369,6 +383,10 @@ fi
 # --- Stop hook: library 저장 체크 ---
 SAVE_CHECK_DEST="$CLAUDE_DIR/hooks/library-save-check.sh"
 
+# 재설치에서도 PreCompact를 지원하는 최신 발췌기를 배치한다.
+mkdir -p "$CLAUDE_DIR/hooks"
+cp "$SCRIPT_DIR/hooks/library-save-check.sh" "$SAVE_CHECK_DEST"
+chmod +x "$SAVE_CHECK_DEST"
 if grep -qF "library-save-check" "$SETTINGS" 2>/dev/null; then
   echo "  $(msg 'library-save-check 훅 이미 존재 — 스킵' 'library-save-check hook already exists — skipped')"
 elif ! command -v jq >/dev/null 2>&1; then
@@ -383,6 +401,16 @@ else
   ' "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
 
   echo "  $(msg 'Stop 훅 등록: library-save-check.sh' 'Stop hook registered: library-save-check.sh')"
+fi
+
+# PreCompact는 같은 발췌기를 사용하며 다음 Stop에 리뷰를 맡긴다.
+if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
+  jq --arg cmd "$HOME/.claude/hooks/library-save-check.sh" '
+    .hooks.PreCompact = (
+      [(.hooks.PreCompact // [])[] |
+        .hooks |= map(select(.command != $cmd)) | select(.hooks | length > 0)] +
+      [{hooks: [{type: "command", command: $cmd, timeout: 10}]}])
+  ' "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
 fi
 
 # --- PreToolUse 훅: library-allow (permission dialog 우회) ---

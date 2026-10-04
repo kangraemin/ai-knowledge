@@ -78,6 +78,7 @@ if [ "$_lfc_installed" = "1" ]; then
       | .hooks.UserPromptSubmit |= ((. // []) | strip("library-autoinject\\.sh"))
       | .hooks.PostToolUse |= ((. // []) | strip("library-activity-log.sh"))
       | .hooks.PreToolUse  |= ((. // []) | strip("library-allow.sh"))
+      | .hooks.PreCompact  |= ((. // []) | strip("library-save-check.sh"))
       | .hooks.Stop        |= ((. // []) | strip("library-save-check.sh|code-lesson-check.sh"))
       | .hooks.SessionEnd   |= ((. // []) | strip("library-sync.sh"))
       | .hooks.PostCompact  |= ((. // []) | strip("library-sync.sh"))

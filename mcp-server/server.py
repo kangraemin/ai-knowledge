@@ -5,6 +5,8 @@ Claude Library MCP Server
 
 import os
 import re
+import math
+import time
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
@@ -92,6 +94,8 @@ def _build_index() -> list[dict]:
             "title": meta.get("title", ""),
             "type": meta.get("type", ""),
             "status": meta.get("status", "stable"),
+            "superseded_by": meta.get("superseded_by", ""),
+            "tags": meta.get("tags", ""),
             "description": meta.get("description", ""),
             "body": body.lower(),
             "path": str(md_file.relative_to(LIBRARY_ROOT)),
@@ -102,64 +106,24 @@ def _build_index() -> list[dict]:
     return _index_cache
 
 
-def _score_entry(entry: dict, terms: list[str]) -> float:
-    """Score an entry against query terms. Higher = more relevant."""
-    if not terms:
-        return 0
-
-    total = 0
-    matched_terms = 0
-
-    for term in terms:
-        term_score = 0
-
-        # Tier 1: topic name (10 pts)
-        if _word_match(term, entry["topic"]):
-            term_score = max(term_score, 10)
-
-        # Tier 2: filename (8 pts)
-        if _word_match(term, entry["filename"]):
-            term_score = max(term_score, 8)
-
-        # Tier 3: description (6 pts)
-        if entry["description"] and _word_match(term, entry["description"].lower()):
-            term_score = max(term_score, 6)
-
-        # Tier 4: category/subcategory (4 pts)
-        cat_text = f"{entry['category']} {entry['subcategory']}"
-        if _word_match(term, cat_text):
-            term_score = max(term_score, 4)
-
-        # Tier 5: body (2 pts)
-        if term in entry["body"]:
-            term_score = max(term_score, 2)
-
-        if term_score > 0:
-            matched_terms += 1
-        total += term_score
-
-    # AND bias: penalize if not all terms matched
-    if len(terms) > 1:
-        total *= (matched_terms / len(terms))
-
-    return total
-
-
-def _search(query: str) -> list[dict]:
-    """Search the index with scoring."""
-    index = _build_index()
-    terms = [t.lower() for t in re.split(r'\s+', query.strip()) if t]
-    if not terms:
+def _search(query: str, include_deprecated=False, k=7) -> list[dict]:
+    """문서 단위 IDF·필드 가중치로 정렬하고 독립적인 관련도 점수를 반환한다."""
+    from kb.search import query_terms
+    from kb.relevance import weights, normalized
+    index = [e for e in _build_index() if include_deprecated or e["status"] != "deprecated"]
+    terms = query_terms(query)
+    if not terms or k <= 0:
         return []
-
+    evidence = [weights(e, terms) for e in index]
+    idfs = [math.log1p(len(index) / max(1, sum(w[i] > 0 for w in evidence)))
+            for i in range(len(terms))]
     scored = []
-    for entry in index:
-        score = _score_entry(entry, terms)
-        if score > 0:
-            scored.append((score, entry))
-
-    scored.sort(key=lambda x: x[0], reverse=True)
-    return [entry for _, entry in scored[:7]]
+    for entry, values in zip(index, evidence):
+        rank_score = sum(w * idf for w, idf in zip(values, idfs)) * sum(w > 0 for w in values)
+        if rank_score:
+            scored.append((rank_score, {**entry, "score": normalized(entry, terms)}))
+    scored.sort(key=lambda item: (-item[0], item[1]["path"]))
+    return [entry for _, entry in scored[:k]]
 
 
 def _safe_path(rel_path: str):
@@ -192,7 +156,10 @@ def library_search(query: str) -> str:
     from kb import api
     if api.postgres():
         return api.search_text(query)
+    start = time.monotonic()
     matches = _search(query)
+    from kb.activity import search_event
+    search_event(query, matches, "files", (time.monotonic() - start) * 1000, library_root=LIBRARY_ROOT)
 
     if not matches:
         return f"'{query}' 관련 라이브러리 항목 없음."
@@ -218,7 +185,13 @@ def library_read(path: str) -> str:
         return f"{path} 는 라이브러리 밖이다"
     if not full_path.exists():
         return f"파일 없음: {path}"
-    return _read_file(full_path)
+    text = _read_file(full_path)
+    from kb.activity import append
+    append({"source": "mcp", "action": "read", "path": path}, LIBRARY_ROOT)
+    meta = _parse_frontmatter(text)
+    if meta.get("status") == "deprecated":
+        text = f"(대체됨 → {meta.get('superseded_by', '')})\n" + text
+    return text
 
 
 @mcp.tool()
@@ -367,6 +340,8 @@ def decision_search(query: str, repo: str = "") -> str:
 
     scored = []
     for e in _decision_entries(repo):
+        if e["status"] == "deprecated":
+            continue
         hay = (e["name"] + " " + e["body"]).lower()
         score = sum(1 for t in terms if _word_match(t, hay))
         if score:

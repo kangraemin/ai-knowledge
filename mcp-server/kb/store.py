@@ -204,14 +204,16 @@ def relate(conn, src_path, dst_path, relation_type, scope=None):
             (src["id"], dst["id"], relation_type),
         )
         if relation_type == "supersedes":
-            _change_status(conn, dst, "deprecated")
+            _change_status(conn, dst, "deprecated", superseded_by=src_path)
         _event(conn, "relate:" + relation_type, src["id"])
 
 
-def _change_status(conn, doc, status, kind=None):
+def _change_status(conn, doc, status, kind=None, superseded_by=None):
     from psycopg.types.json import Jsonb
 
     meta = dict(doc["frontmatter"], status=status)
+    if superseded_by is not None:
+        meta["superseded_by"] = superseded_by
     raw = render(meta, doc["body"])
     row = conn.execute(
         """UPDATE kb.documents SET kind=%s,status=%s,frontmatter=%s,content_hash=%s,

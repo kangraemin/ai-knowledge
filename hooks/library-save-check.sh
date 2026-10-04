@@ -5,6 +5,8 @@
 command -v jq &>/dev/null || exit 0
 
 INPUT=$(cat)
+umask 077
+EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // "Stop"')
 
 # 재진입 방지
 STOP_HOOK_ACTIVE=$(echo "$INPUT" | jq -r '.stop_hook_active // false')
@@ -23,17 +25,26 @@ fi
 
 # 20번에 1번만 실행 (세션별 독립)
 SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
+[[ "$SESSION_ID" =~ ^[A-Za-z0-9_-]+$ ]] || exit 0
 TRANSCRIPT=$(echo "$INPUT" | jq -r '.transcript_path // ""')
 COUNTER_DIR="$HOME/.claude/hooks/.counters"
 mkdir -p "$COUNTER_DIR" 2>/dev/null || exit 0
 COUNTER_FILE="$COUNTER_DIR/.library-check-counter-$SESSION_ID"
 MARKER_FILE="$HOME/.claude/hooks/.library-check-marker-$SESSION_ID"
-COUNT=0
-[ -f "$COUNTER_FILE" ] && COUNT=$(cat "$COUNTER_FILE")
-COUNT=$((COUNT + 1))
-echo "$COUNT" > "$COUNTER_FILE"
-# 20의 배수일 때만 동작 (첫 호출은 skip)
-[ $((COUNT % 20)) -ne 0 ] && exit 0
+PENDING_FILE="$HOME/.claude/hooks/.library-review-pending-$SESSION_ID.txt"
+# 압축 발췌는 다음 Stop에서 카운터보다 우선한다.
+if [ "$EVENT" != "PreCompact" ] && [ -s "$PENDING_FILE" ]; then
+  EXCERPT_FILE=$(mktemp "$HOME/.claude/hooks/.library-review-excerpt-$SESSION_ID-XXXXXX") || exit 0
+  mv "$PENDING_FILE" "$EXCERPT_FILE" || exit 0
+else
+if [ "$EVENT" != "PreCompact" ]; then
+  COUNT=0
+  [ -f "$COUNTER_FILE" ] && COUNT=$(cat "$COUNTER_FILE")
+  [[ "$COUNT" =~ ^[0-9]+$ ]] || COUNT=0
+  COUNT=$((COUNT + 1))
+  echo "$COUNT" > "$COUNTER_FILE"
+  [ $((COUNT % 20)) -ne 0 ] && exit 0
+fi
 
 # transcript 없거나 접근 불가 → skip
 { [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ]; } && exit 0
@@ -41,10 +52,11 @@ echo "$COUNT" > "$COUNTER_FILE"
 # 지난 리뷰 이후 새 대화만 추출 (증분, user/assistant 텍스트만)
 MARKER=0
 [ -f "$MARKER_FILE" ] && MARKER=$(cat "$MARKER_FILE")
+[[ "$MARKER" =~ ^[0-9]+$ ]] || MARKER=0
 TOTAL=$(wc -l < "$TRANSCRIPT" | tr -d ' ')
-EXCERPT_FILE="$HOME/.claude/hooks/.library-review-excerpt-$SESSION_ID-$TOTAL.txt"
-# 잔여 발췌 파일 제거 — 존재 여부가 이번 실행 결과만 반영하도록
-rm -f "$EXCERPT_FILE"
+# 압축으로 transcript가 짧아졌으면 새 파일의 처음부터 읽는다.
+[ "$MARKER" -gt "$TOTAL" ] && MARKER=0
+EXCERPT_FILE=$(mktemp "$HOME/.claude/hooks/.library-review-excerpt-$SESSION_ID-XXXXXX") || exit 0
 
 python3 - "$TRANSCRIPT" "$MARKER" "$TOTAL" "$EXCERPT_FILE" <<'PYEOF'
 import json, sys
@@ -68,12 +80,31 @@ joined = '\n\n'.join(parts)
 if joined.strip():
     open(out, 'w', encoding='utf-8').write(joined)
 PYEOF
+if [ "$?" -ne 0 ]; then
+  rm -f "$EXCERPT_FILE"
+  exit 0
+fi
+
+# PreCompact는 지시를 주입하지 않고 발췌만 누적한다.
+if [ "$EVENT" = "PreCompact" ]; then
+  if [ -s "$EXCERPT_FILE" ]; then
+    cat "$EXCERPT_FILE" >> "$PENDING_FILE" || exit 0
+    printf '\n\n' >> "$PENDING_FILE"
+  fi
+  rm -f "$EXCERPT_FILE"
+  echo "$TOTAL" > "$MARKER_FILE"
+  exit 0
+fi
 
 # 마커는 항상 현재 위치로 업데이트 (중복 리뷰 방지)
 echo "$TOTAL" > "$MARKER_FILE"
 
 # 추출 내용 없으면 block 없이 종료
-[ ! -f "$EXCERPT_FILE" ] && exit 0
+if [ ! -s "$EXCERPT_FILE" ]; then
+  rm -f "$EXCERPT_FILE"
+  exit 0
+fi
+fi
 
 jq -n --arg path "$EXCERPT_FILE" '{
   "decision": "block",

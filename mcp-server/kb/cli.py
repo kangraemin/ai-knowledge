@@ -3,6 +3,7 @@
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
 from . import db, store
 from .search import search, format_results
@@ -86,6 +87,8 @@ def parser():
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("migrate")
     sub.add_parser("doctor")
+    stats_parser = sub.add_parser("stats")
+    stats_parser.add_argument("--days", type=int, default=30)
     s = sub.add_parser("search")
     s.add_argument("query")
     s.add_argument("--format", choices=["text", "inject", "json"], default="text")
@@ -125,13 +128,17 @@ def parser():
 
 def main(argv=None):
     args = parser().parse_args(argv)
+    started = time.monotonic()
     try:
         from .api import postgres
 
-        if args.command == "search" and not postgres():
+        if args.command == "stats":
+            from .activity import stats
+            result = stats(args.days)
+        elif args.command == "search" and not postgres():
             import server
 
-            rows = server._search(args.query)[: args.k]
+            rows = server._search(args.query, include_deprecated=args.include_deprecated, k=args.k)
             result = (
                 json.dumps(rows, ensure_ascii=False)
                 if args.format == "json"
@@ -188,6 +195,27 @@ def main(argv=None):
                         if args.format == "json"
                         else format_results(rows, args.budget)
                     )
+        if args.command == "search":
+            from .activity import search_event
+            from .relevance import select
+            backend = "postgres" if postgres() else "files"
+            reason = None
+            logged_rows = rows
+            if args.format == "inject":
+                selected, reason = select(rows, backend, args.budget)
+                result = format_results(selected, args.budget)
+                logged_rows = selected if selected else rows
+                if postgres():
+                    from .activity import pg_event
+                    try:
+                        with db.connect() as conn:
+                            pg_event(conn, "inject" if result else "skip:" + reason, query=args.query)
+                    except Exception:
+                        pass
+            search_event(args.query, logged_rows, backend, (time.monotonic() - started) * 1000,
+                         source="autoinject" if args.format == "inject" else "cli",
+                         injected=bool(result) if args.format == "inject" else False,
+                         skipped_reason=reason, action="inject" if args.format == "inject" else "search")
         if result:
             print(
                 result

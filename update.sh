@@ -84,6 +84,14 @@ HOOK_DIR="$HOME/.claude/hooks"
 
 LIB_DIR="$HOME/claude-library"
 
+# 검색 로그에는 프롬프트 원문이 포함되므로 추적 대상에서 제외한다.
+# 기존 추적 파일의 인덱스나 이력은 변경하지 않는다.
+mkdir -p "$LIB_DIR"
+if ! grep -qxF '.activity/search-*.jsonl' "$LIB_DIR/.gitignore" 2>/dev/null; then
+  printf '\n.activity/search-*.jsonl\n' >> "$LIB_DIR/.gitignore"
+fi
+
+
 copy_if_changed "$PACKAGE_DIR/hooks/library-sync.sh" "$HOOK_DIR/library-sync.sh" "library-sync.sh (hook)"
 copy_if_changed "$PACKAGE_DIR/hooks/library-save-check.sh" "$HOOK_DIR/library-save-check.sh" "library-save-check.sh (stop hook)"
 copy_if_changed "$PACKAGE_DIR/scripts/update-check.sh" "$HOOK_DIR/learnings-update-check.sh" "learnings-update-check.sh (script)"
@@ -195,6 +203,16 @@ if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
     ok "library 경로 Write/Edit 권한 추가 (절대경로 + additionalDirectories 포함)"
     UPDATED=$((UPDATED + 1))
   fi
+fi
+
+# PreCompact는 같은 발췌기를 사용하며 다음 Stop에 리뷰를 맡긴다.
+if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
+  jq --arg cmd "$HOME/.claude/hooks/library-save-check.sh" '
+    .hooks.PreCompact = (
+      [(.hooks.PreCompact // [])[] |
+        .hooks |= map(select(.command != $cmd)) | select(.hooks | length > 0)] +
+      [{hooks: [{type: "command", command: $cmd, timeout: 10}]}])
+  ' "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
 fi
 
 # --- PreToolUse 훅: library-allow 등록 (누락 시 보충) ---
