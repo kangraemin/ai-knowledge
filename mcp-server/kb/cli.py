@@ -87,6 +87,7 @@ def parser():
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("migrate")
     sub.add_parser("doctor")
+    sub.add_parser("duplicates").add_argument("path")
     stats_parser = sub.add_parser("stats")
     stats_parser.add_argument("--days", type=int, default=30)
     usage = sub.add_parser("usage-log")
@@ -99,7 +100,7 @@ def parser():
     report_parser.add_argument("--save", action="store_true")
     s = sub.add_parser("search")
     s.add_argument("query")
-    s.add_argument("--format", choices=["text", "inject", "json"], default="text")
+    s.add_argument("--format", choices=["text", "inject", "trigger", "json"], default="text")
     s.add_argument("--budget", type=int, default=1500)
     s.add_argument("--scope")
     s.add_argument("--include-deprecated", action="store_true")
@@ -140,7 +141,10 @@ def main(argv=None):
     try:
         from .api import postgres
 
-        if args.command == "usage-log":
+        if args.command == "duplicates":
+            from .duplicates import related
+            result = related(args.path)
+        elif args.command == "usage-log":
             from .usage import log_usage
             log_usage(args.transcript, args.session, args.cwd)
             return 0
@@ -224,8 +228,12 @@ def main(argv=None):
             backend = "postgres" if postgres() else "files"
             reason = None
             logged_rows = rows
-            if args.format == "inject":
-                selected, reason = select(rows, backend, args.budget)
+            if args.format in ("inject", "trigger"):
+                if args.format == "trigger":
+                    from .relevance import select_trigger
+                    selected, reason = select_trigger(rows, args.budget)
+                else:
+                    selected, reason = select(rows, backend, args.budget)
                 result = format_results(selected, args.budget)
                 logged_rows = selected if selected else rows
                 if postgres():
@@ -236,9 +244,10 @@ def main(argv=None):
                     except Exception:
                         pass
             search_event(args.query, logged_rows, backend, (time.monotonic() - started) * 1000,
-                         source="autoinject" if args.format == "inject" else "cli",
-                         injected=bool(result) if args.format == "inject" else False,
-                         skipped_reason=reason, action="inject" if args.format == "inject" else "search")
+                         source={"inject": "autoinject", "trigger": "trigger"}.get(args.format, "cli"),
+                         injected=bool(result) if args.format in ("inject", "trigger") else False,
+                         skipped_reason=reason,
+                         action="inject" if args.format in ("inject", "trigger") else "search")
         if result:
             print(
                 result

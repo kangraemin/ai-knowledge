@@ -159,6 +159,13 @@ MIN_CORE_MATCHES = 4
 SHORT_QUERY_TERMS = 16
 SHORT_MIN_SCORE = .4
 DEFAULT_DUPLICATE_SCORE = .045
+# 순간 트리거(명령 실패·작업 시작)는 검색이 필요한 시점이라 기저율이 높다.
+# 자동 주입보다 느슨하되, 흔한 단어끼리의 우연한 일치(희소어 1개 이하)는 거른다.
+TRIGGER_MIN_SCORE = .25
+TRIGGER_MIN_CORE_MATCHES = 2
+TRIGGER_MAX_RESULTS = 2
+# 희소어가 1개뿐이어도 점수가 충분히 높으면(예: 에러의 모듈명이 제목에 그대로) 인정한다.
+TRIGGER_STRONG_SCORE = .35
 
 
 def minimum(backend):
@@ -190,4 +197,18 @@ def select(rows, backend, budget):
         if len(format_results(kept + [row], budget).splitlines()) != len(kept) + 1:
             break
         kept.append(row)
+    return kept, None if kept else "budget"
+
+
+def select_trigger(rows, budget):
+    from .search import format_results
+    qualified = [row for row in rows
+                 if row.get("score", 0) >= TRIGGER_STRONG_SCORE
+                 or (row.get("score", 0) >= TRIGGER_MIN_SCORE
+                     and row.get("injection_evidence", {}).get("core_matches", 0) >= TRIGGER_MIN_CORE_MATCHES)]
+    if not qualified:
+        return [], "weak_evidence" if rows else "no_results"
+    kept = qualified[:TRIGGER_MAX_RESULTS]
+    while kept and len(format_results(kept, budget).splitlines()) != len(kept):
+        kept = kept[:-1]
     return kept, None if kept else "budget"

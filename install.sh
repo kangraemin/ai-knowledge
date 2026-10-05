@@ -707,21 +707,9 @@ else
   echo "  $(msg 'Stop 훅 등록: code-lesson-check.sh' 'Stop hook registered: code-lesson-check.sh')"
 fi
 
-# --- UserPromptSubmit: 검색 결과 자동 주입 ---
-if [ -f "$SCRIPT_DIR/hooks/library-autoinject.sh" ]; then
-  cp "$SCRIPT_DIR/hooks/library-autoinject.sh" "$HOME/.claude/hooks/library-autoinject.sh"
-  chmod +x "$HOME/.claude/hooks/library-autoinject.sh"
-  if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
-    cp "$SETTINGS" "$SETTINGS.bak"
-    jq --arg cmd "$HOME/.claude/hooks/library-autoinject.sh" '
-      .hooks.UserPromptSubmit = (
-        [(.hooks.UserPromptSubmit // [])[] |
-          .hooks |= map(select(.command != $cmd)) | select(.hooks | length > 0)] +
-        [{hooks: [{type: "command", command: $cmd, timeout: 5}]}])
-    ' "$SETTINGS" > "$SETTINGS.tmp.$$"
-    mv "$SETTINGS.tmp.$$" "$SETTINGS"
-  fi
-fi
+# 순간 검색 훅은 프로필과 무관하게 공통 등록한다.
+source "$SCRIPT_DIR/scripts/library-hooks.sh"
+configure_library_hooks "$SCRIPT_DIR"
 
 # --- MCP 서버 등록 ---
 if command -v jq >/dev/null 2>&1; then

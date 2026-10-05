@@ -32,6 +32,11 @@ def query_terms(query):
     # 영문 기술명 뒤의 조사와 자주 쓰는 서술형 어미를 제거한다.
     terms = [re.sub(r"^([a-z][a-z0-9._+-]*)(?:에서는|에서|으로|로|은|는|이|가|을|를|의|도|와|과)$", r"\1", t) for t in terms]
     terms = [re.sub(r"^([가-힣]{2,}?)(?:했습니다|합니다|하였다|한다|하는|하기|하면|되는|됩니다|된다)$", r"\1", t) for t in terms]
+    # 에러 메시지의 모듈 경로(mcp.server.fastmcp)는 마지막 조각이 핵심어다 — 조각도 함께 쓴다.
+    # 버전 번호(v1.2)는 쪼개지 않는다 — 조각이 모두 글자를 포함할 때만 모듈 경로로 본다.
+    terms += [part for t in terms if "." in t
+              and all(re.search(r"[a-z]", p) and len(p) > 1 for p in t.split("."))
+              for part in t.split(".")]
     return list(dict.fromkeys(t for t in terms if len(t) > 1 and t not in _STOPWORDS))
 
 

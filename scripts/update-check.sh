@@ -29,6 +29,7 @@ update_library_mcp() {
     # 변경 직전 스냅샷을 사용하고 동시 쓰기가 감지되면 덮어쓰지 않는다.
     if ! cp -p "$sf" "$snapshot" || ! jq --arg branch "$branch" --arg spec "$spec" \
       --arg home "$HOME" --arg mode "$mode" '
+      .mcpServers["claude-library"].alwaysLoad = true |
       .mcpServers["claude-library"].command = "uvx" |
       .mcpServers["claude-library"].args = (if $branch == "main" then
         ["--with", "mcp<2", "claude-library-mcp@latest"] else

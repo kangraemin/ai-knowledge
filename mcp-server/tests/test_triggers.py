@@ -1,0 +1,135 @@
+import importlib.util
+import json
+from pathlib import Path
+import pytest
+
+spec = importlib.util.spec_from_file_location('trigger', Path(__file__).resolve().parents[2] / 'hooks/library-trigger.py')
+trigger = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(trigger)
+
+
+@pytest.mark.parametrize('response,expected', [({'exit_code': 1}, True), ({'exitCode': '2'}, True), ({'returncode': 0}, False), ({'stderr': 'ValueError: broken'}, True), ({'stderr': 'Traceback (most recent call last):'}, True), ({'stderr': 'build failed'}, True), ({'stderr': 'warning only'}, False), ({}, False)])
+def test_failed(response, expected):
+    assert trigger.failed(response) == expected
+
+
+def test_core_and_cache():
+    assert trigger.core_error('Traceback (most recent call last):\n  foo()\nValueError: broken') == 'ValueError: broken'
+    assert trigger.claim('s1', 'error', 'broken')
+    assert not trigger.claim('s1', 'error', 'broken')
+    assert trigger.claim('s2', 'error', 'broken')
+
+
+@pytest.mark.parametrize('command,expected', [('bouncer start bug "fix parser"', 'bug fix parser'), ('echo bouncer start bug', ''), ('bouncer restart bug', ''), ('bouncer start "', '')])
+def test_start(command, expected):
+    assert trigger.start_args(command) == expected
+
+
+def test_paths(tmp_path, monkeypatch):
+    monkeypatch.setenv('LIBRARY_ROOT', str(tmp_path))
+    assert trigger.library_path(str(tmp_path / 'library/new.md'))
+    assert not trigger.library_path(str(tmp_path / 'library/../outside.md'))
+    assert not trigger.library_path(str(tmp_path / 'library/index.md'))
+    (tmp_path / 'library').mkdir()
+    (tmp_path / 'library/link').symlink_to(tmp_path)
+    assert not trigger.library_path(str(tmp_path / 'library/link/out.md'))
+
+
+def test_inject_and_log(tmp_path, monkeypatch, capsys):
+    stub = tmp_path / 'stub.py'
+    stub.write_text('print("related context")')
+    monkeypatch.setenv('LIBRARY_KB_CMD', f'python3 {stub}')
+    payload = dict(session_id='s', tool_name='Bash', tool_response={'stderr': 'Error: synthetic'}, tool_input={})
+    trigger.run(payload)
+    assert json.loads(capsys.readouterr().out)['hookSpecificOutput']['additionalContext'] == 'related context'
+    trigger.run(payload)
+    assert capsys.readouterr().out == ''
+    logs = list((Path(__import__('os').environ['LIBRARY_ROOT']) / '.activity').glob('*.jsonl'))
+    record = json.loads(logs[0].read_text())
+    assert record['source'] == 'trigger:error'
+    assert 'query' not in record
+
+
+def test_duplicates(tmp_path, monkeypatch):
+    from kb.duplicates import related
+    monkeypatch.setenv('LIBRARY_ROOT', str(tmp_path))
+    folder = tmp_path / 'library'
+    folder.mkdir()
+    for name in ('old', 'new'):
+        (folder / f'{name}.md').write_text('---\ntype: knowledge\ntitle: Synthetic parser boundary regression\ndescription: structured input validation\n---\n')
+    assert related(folder / 'new.md') == '중복/관련 가능: library/old.md'
+
+
+def test_new_document_edit_scope(tmp_path, monkeypatch):
+    monkeypatch.setenv('LIBRARY_ROOT', str(tmp_path))
+    payload = dict(session_id='s', tool_input={'file_path': str(tmp_path / 'library/new.md')}, tool_response={'type': 'update'})
+    assert trigger.new_document(payload) is None
+    payload['tool_response']['type'] = 'create'
+    assert trigger.new_document(payload)
+    payload['tool_response']['type'] = 'update'
+    assert trigger.new_document(payload)
+    payload['session_id'] = 'other'
+    assert trigger.new_document(payload) is None
+
+
+def test_failure_event_and_start(tmp_path, monkeypatch, capsys):
+    stub = tmp_path / 'stub.py'
+    stub.write_text('import sys\nprint(sys.argv[-1])')
+    monkeypatch.setenv('LIBRARY_KB_CMD', f'python3 {stub}')
+    trigger.run(dict(session_id='f', hook_event_name='PostToolUseFailure', tool_name='Bash', error='Exit code 1\nError: synthetic failure'))
+    output = json.loads(capsys.readouterr().out)['hookSpecificOutput']
+    assert output['hookEventName'] == 'PostToolUseFailure'
+    assert output['additionalContext'] == 'Error: synthetic failure'
+    trigger.run(dict(tool_name='Skill', tool_input={'skill': 'dev-bounce', 'args': 'synthetic task'}))
+    assert 'synthetic task' in capsys.readouterr().out
+
+
+def test_silent_failure(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv('LIBRARY_KB_CMD', '/nonexistent/synthetic-kb')
+    trigger.run(dict(tool_name='Bash', tool_response={'exit_code': 1, 'stderr': 'Error: synthetic'}))
+    assert capsys.readouterr().out == ''
+
+
+def test_hook_timeout_is_silent(tmp_path, monkeypatch):
+    import subprocess
+    import time
+    stub = tmp_path / 'sleep.py'
+    stub.write_text('import time\ntime.sleep(30)')
+    monkeypatch.setenv('LIBRARY_KB_CMD', f'python3 {stub}')
+    started = time.monotonic()
+    result = subprocess.run(['bash', str(Path(trigger.__file__).with_suffix('.sh'))],
+                            input=json.dumps(dict(tool_name='Bash', tool_response={'stderr': 'Error: timeout fixture'})),
+                            text=True, capture_output=True, timeout=7)
+    assert result.returncode == 0 and result.stdout == '' and result.stderr == ''
+    assert time.monotonic() - started < 6
+
+
+def test_write_real_cli(tmp_path, monkeypatch, capsys):
+    import sys
+    monkeypatch.setenv('LIBRARY_ROOT', str(tmp_path))
+    monkeypatch.setenv('LIBRARY_KB_CMD', f'{sys.executable} -m kb.cli')
+    folder = tmp_path / 'library'
+    folder.mkdir()
+    for name in ('old', 'new'):
+        (folder / f'{name}.md').write_text('---\ntype: knowledge\ntitle: Synthetic symmetric duplicate detection\ndescription: metadata similarity\n---\n')
+    trigger.run(dict(session_id='write', tool_name='Write', tool_input={'file_path': str(folder / 'new.md')}, tool_response={'type': 'create'}))
+    output = json.loads(capsys.readouterr().out)
+    assert output['hookSpecificOutput']['additionalContext'] == '중복/관련 가능: library/old.md'
+
+
+def test_dotted_module_path_also_yields_last_segment():
+    from kb.search import query_terms
+    terms = query_terms("ModuleNotFoundError: No module named pkg.server.widgetlib")
+    assert "pkg.server.widgetlib" in terms and "widgetlib" in terms
+
+
+def test_trigger_gate_accepts_strong_or_rare_backed_and_rejects_common_overlap():
+    from kb.relevance import select_trigger
+    strong = {"path": "library/a.md", "title": "a", "score": .4, "injection_evidence": {"core_matches": 1}}
+    backed = {"path": "library/b.md", "title": "b", "score": .3, "injection_evidence": {"core_matches": 2}}
+    common = {"path": "library/c.md", "title": "c", "score": .3, "injection_evidence": {"core_matches": 1}}
+    weak = {"path": "library/d.md", "title": "d", "score": .2, "injection_evidence": {"core_matches": 3}}
+    kept, reason = select_trigger([strong, backed, common, weak], 1500)
+    assert [r["path"] for r in kept] == ["library/a.md", "library/b.md"] and reason is None
+    assert select_trigger([common, weak], 1500) == ([], "weak_evidence")
+    assert select_trigger([], 1500) == ([], "no_results")

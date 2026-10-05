@@ -829,6 +829,7 @@ for ev in ('PreToolUse', 'PostToolUse'):
 }
 
 @test "TC-79: autoinject installs once with timeout 5 and uninstall preserves other hooks" {
+  export LIBRARY_AUTOINJECT=1
   install_with_input 1
   install_with_input 1
   bash "$SOURCE_DIR/update.sh"
@@ -1120,6 +1121,8 @@ assert_mcp_preserved() {
   python3 - "$TEST_HOME/user-before" "$HOME/.claude.json" <<'PY'
 import json, sys
 before, after = [json.load(open(p)) for p in sys.argv[1:]]
+assert after['mcpServers']['claude-library']['alwaysLoad'] is True
+before['mcpServers']['claude-library']['alwaysLoad'] = True
 for cfg in (before, after):
     cfg['mcpServers']['claude-library'].pop('args')
 assert before == after
@@ -1537,4 +1540,38 @@ DOC
   grep -q '새 관리 규칙' "$CLAUDE_DIR/CLAUDE.md"
   [ ! -e "$LIB_DIR/decisions/_global/changelog" ]
   ! grep -q '· process:update.sh ·' "$LIB_DIR/GUIDE.md"
+}
+
+@test "trigger hooks default off migration and profile parity" {
+  for profile in user maintainer; do
+    export LEARNINGS_PROFILE="$profile" LIBRARY_AUTOINJECT=1
+    install_with_input 1
+    unset LIBRARY_AUTOINJECT
+    bash "$SOURCE_DIR/update.sh"
+    bash "$SOURCE_DIR/update.sh"
+    [ ! -e "$CLAUDE_DIR/hooks/library-autoinject.sh" ]
+    jq -e '[.hooks.UserPromptSubmit[].hooks[] | select(.command | contains("library-autoinject"))] | length == 0' "$SETTINGS"
+    jq -e '[.hooks.PostToolUse[].hooks[] | select(.command | endswith("/library-trigger.sh"))] | length == 1 and .[0].timeout == 5' "$SETTINGS"
+    jq -e '[.hooks.PostToolUseFailure[].hooks[] | select(.command | endswith("/library-trigger.sh"))] | length == 1' "$SETTINGS"
+  done
+  install_with_input 1
+  [ ! -e "$CLAUDE_DIR/hooks/library-autoinject.sh" ]
+  sed 's|</dev/tty||g' "$SOURCE_DIR/uninstall.sh" > "$TEST_HOME/uninstall.sh"
+  bash "$TEST_HOME/uninstall.sh" "$TEST_HOME" <<< n
+  [ ! -e "$CLAUDE_DIR/hooks/library-trigger.sh" ]
+  [ ! -e "$CLAUDE_DIR/hooks/library-trigger.py" ]
+  jq -e '[.hooks.PostToolUse[], .hooks.PostToolUseFailure[] | .hooks[] | select(.command | contains("library-trigger"))] | length == 0' "$SETTINGS"
+}
+
+@test "alwaysLoad updates both files preserving custom keys and backups" {
+  for file in "$SETTINGS" "$HOME/.claude.json"; do
+    printf '%s\n' '{"custom":42,"mcpServers":{"other":{"command":"keep"},"claude-library":{"command":"old","env":{"CUSTOM":"yes"},"custom":true}}}' > "$file"
+  done
+  source "$SOURCE_DIR/scripts/update-check.sh"
+  update_library_mcp main claude-library-mcp install
+  update_library_mcp main claude-library-mcp update
+  for file in "$SETTINGS" "$HOME/.claude.json"; do
+    jq -e '.custom == 42 and .mcpServers.other.command == "keep" and .mcpServers["claude-library"].alwaysLoad == true and .mcpServers["claude-library"].env.CUSTOM == "yes" and .mcpServers["claude-library"].custom == true' "$file"
+    jq -e '.mcpServers["claude-library"].command == "old"' "$file.bak"
+  done
 }

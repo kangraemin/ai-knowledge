@@ -260,7 +260,11 @@ bash update.sh --branch main
 
 The branch is stored in `~/.claude/hooks/.learnings-branch`; `LEARNINGS_BRANCH` overrides it for the current run. `--branch main` removes that file. Non-main branches run the MCP server from the same Git branch; main restores PyPI. Settings are backed up to `settings.json.bak`. Automatic checks only notify unless `LEARNINGS_AUTO_UPDATE=1` is set.
 
-The installer registers `library-autoinject.sh` on `UserPromptSubmit` with a 5-second timeout. Set `LIBRARY_AUTOINJECT=0` to disable automatic search context.
+Prompt autoinjection is off by default. Install/update removes its old registration and installed file; run with `LIBRARY_AUTOINJECT=1` to opt in. Both existing MCP registrations receive `alwaysLoad: true`, preserving other settings.
+
+`library-trigger.sh` searches on Bash errors (including `PostToolUseFailure`), `dev-bounce`/`bouncer start`, and checks new library Markdown files for symmetric duplicate similarity. Hooks use a 5-second timeout, fail quietly, deduplicate errors per session, and record `source=trigger:error|start|write` in `.activity`. Uninstall removes the hooks. CLI resolution: `LIBRARY_KB_CMD`, installed `claude-library-kb`, then the saved uvx package spec.
+
+Official references: [alwaysLoad](https://code.claude.com/docs/en/mcp#exempt-a-server-from-deferral), [PostToolUse](https://code.claude.com/docs/en/hooks#posttooluse), [PostToolUseFailure](https://code.claude.com/docs/en/hooks#posttoolusefailure). Bash structured output documents `stdout`, `stderr`, `interrupted`, and `isImage`; exit-code fields are checked when present. Failure events use the top-level `error`. Both events support `additionalContext`.
 
 ## License
 

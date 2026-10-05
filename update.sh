@@ -287,20 +287,9 @@ if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
   fi
 fi
 
-# --- UserPromptSubmit: 검색 결과 자동 주입 ---
-if [ -f "$PACKAGE_DIR/hooks/library-autoinject.sh" ]; then
-  copy_if_changed "$PACKAGE_DIR/hooks/library-autoinject.sh" "$HOOK_DIR/library-autoinject.sh" "library-autoinject.sh (prompt hook)"
-  if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
-    cp "$SETTINGS" "$SETTINGS.bak"
-    jq --arg cmd "$HOME/.claude/hooks/library-autoinject.sh" '
-      .hooks.UserPromptSubmit = (
-        [(.hooks.UserPromptSubmit // [])[] |
-          .hooks |= map(select(.command != $cmd)) | select(.hooks | length > 0)] +
-        [{hooks: [{type: "command", command: $cmd, timeout: 5}]}])
-    ' "$SETTINGS" > "$SETTINGS.tmp.$$"
-    mv "$SETTINGS.tmp.$$" "$SETTINGS"
-  fi
-fi
+# 순간 검색 훅은 프로필과 무관하게 공통 등록한다.
+source "$PACKAGE_DIR/scripts/library-hooks.sh"
+configure_library_hooks "$PACKAGE_DIR"
 
 # MCP 전환은 설치/자동 체커와 같은 함수를 사용한다.
 source "$PACKAGE_DIR/scripts/update-check.sh"
