@@ -10,7 +10,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import activity
-from .relevance import minimum, normalized
+from .relevance import (minimum, normalized, Corpus, duplicate_similarity,
+                        DEFAULT_DUPLICATE_SCORE, citation_signals)
 from .search import query_terms
 
 
@@ -72,8 +73,8 @@ def inventory(root):
 
 
 def offline(query, docs):
-    terms = query_terms(query)
-    rows = [{**doc, 'score': normalized(doc, terms)} for doc in docs]
+    corpus = Corpus(docs)
+    rows = [{**doc, 'score': score} for doc, score in zip(docs, corpus.scores(query))]
     return sorted((r for r in rows if r['score'] > 0), key=lambda r: (-r['score'], r['path']))
 
 
@@ -141,6 +142,7 @@ def analyze(transcript, session, cwd, root):
     start = stamp(turn[0]['timestamp']) if turn[0].get('timestamp') else None
     docs = inventory(root)
     threshold = minimum('files')
+    corpus = Corpus(docs)
     calls = {'library_search': [], 'library_read': [], 'decision_*': 0, 'library_write': [], 'library_edit': []}
     tools, results, assistant = {}, {}, []
     for row in turn[1:]:
@@ -176,7 +178,7 @@ def analyze(transcript, session, cwd, root):
             except ValueError:
                 if not found and not re.search(r'항목 없음|결과 없음|no (?:results|matches)|^\s*$', raw, re.I):
                     unknown += 1
-            search_rows.extend({**r, 'score': float(r.get('score', normalized(r, query_terms(query))))} for r in found)
+            search_rows.extend({**r, 'score': float(r.get('score', normalized(r, query_terms(query), corpus)))} for r in found)
         elif short == 'library_read':
             calls['library_read'].append(str(args.get('path', '')))
         elif short.startswith('decision_'):
@@ -206,13 +208,13 @@ def analyze(transcript, session, cwd, root):
     exposed = sorted(set(injected_paths + [r['path'] for r in search_rows]))
     candidates = set(exposed + calls['library_read'])
     by_path = {d['path']: d for d in docs}
-    cited_paths, cited = [], []
+    cited_paths, cited, cited_evidence = [], [], {}
     for path in sorted(candidates):
-        aliases = [path, Path(path).name, by_path.get(path, {}).get('title', '')]
-        matches = [s for s in aliases if s and s in answer and s not in ('index.md', 'log.md')]
-        if matches:
+        signals = citation_signals(by_path.get(path, {'path': path}), answer, corpus)
+        if signals:
             cited_paths.append(path)
-            cited.extend(matches)
+            cited_evidence[path] = signals
+            cited.extend(s['value'] for s in signals if 'value' in s)
     if '📚 library 참조' in answer:
         cited.append('📚 library 참조')
     # 이번 턴에 쓴 문서는 기회·중복의 기존 지식 후보에서 제외한다.
@@ -228,7 +230,9 @@ def analyze(transcript, session, cwd, root):
         meta = _parse_frontmatter(content)
         query = ' '.join(str(meta.get(k, '')) for k in ('title', 'description')).strip()
         if query:
-            hits = [r for r in offline(query, existing) if r['score'] >= 2 * threshold]
+            hits = sorted(({**d, 'score': duplicate_similarity(meta, d, corpus)} for d in existing),
+                          key=lambda d: (-d['score'], d['path']))
+            hits = [d for d in hits if d['score'] >= DEFAULT_DUPLICATE_SCORE]
             if hits:
                 duplicates.append({'path': path, 'matches': [{'path': r['path'], 'score': r['score']} for r in hits[:7]]})
     contact = injected or bool(calls['library_search'] or calls['library_read'])
@@ -247,7 +251,7 @@ def analyze(transcript, session, cwd, root):
         labels.append('no_need')
     return {'prompt': prompt, 'prompt_len': len(prompt), 'turn_id': turn[0].get('uuid'),
             'autoinject': {'injected': injected, 'paths': injected_paths, 'skipped_reason': injection.get('skipped_reason', None if injection else 'no_event')},
-            'calls': calls, 'cited': sorted(set(cited)), 'cited_paths': cited_paths, 'exposed_paths': exposed,
+            'calls': calls, 'cited': sorted(set(cited)), 'cited_evidence': cited_evidence, 'cited_paths': cited_paths, 'exposed_paths': exposed,
             'search_paths': sorted({r['path'] for r in search_rows}), 'search_unknown': unknown,
             'opportunity': {'top_score': top_score, 'top_paths': [r['path'] for r in opportunity[:7]], 'threshold': threshold},
             'duplicates': duplicates, 'labels': labels}
@@ -314,7 +318,8 @@ def report(days=30, root=None):
         touching = bool(auto.get('injected') or searching or calls.get('library_read'))
         contact += touching
         injected += bool(auto.get('injected'))
-        inject_used += bool(auto.get('injected') and 'hit_used' in r.get('labels', []))
+        inject_used += bool(auto.get('injected') and
+                            set(auto.get('paths', [])) & set(r.get('cited_paths', [])))
         searched += searching
         search_success += bool(searching and (set(r.get('search_paths', [])) & set(calls.get('library_read', []) + r.get('cited_paths', []))))
         opp = r.get('opportunity', {})
@@ -335,7 +340,9 @@ def report(days=30, root=None):
         return {'numerator': n, 'denominator': d, 'rate': n / d if d else None}
     dead = docs - set(exposed) - set(read) - set(cited)
     return {'days': days, 'turns': len(valid), 'parse_errors': len(rows) - len(valid),
-            'contact_rate': ratio(contact, len(valid)), 'injection_precision': ratio(inject_used, injected),
+            'contact_rate': ratio(contact, len(valid)), 'injection_citation_rate': ratio(inject_used, injected),
+            'injection_precision': ratio(inject_used, injected),
+            'injection_precision_deprecated': '인용률 별칭. 관련성 정밀도는 수작업 라벨로 별도 평가한다.',
             'search_success_rate': ratio(search_success, searched), 'missed_rate': ratio(counts['missed'], opportunities),
             'searched_empty_rate': ratio(counts['searched_empty'], searched), 'labels': dict(counts),
             'duplicate_write_count': len(duplicates), 'duplicate_writes': duplicates,

@@ -1,31 +1,149 @@
-"""파일·Postgres 공통의 필드 증거 점수(0~1)."""
+"""코퍼스 IDF 커버리지와 별도의 대칭 문서 유사도. 점수는 확률이 아니다."""
 
 import math
 import re
+from collections import Counter, defaultdict
+from functools import lru_cache
 
 
-def weights(entry, terms):
-    fields = [(str(entry.get(key) or "").lower(), weight)
-              for key, weight in (("title", 6), ("path", 5), ("description", 4),
-                                  ("tags", 3), ("body", 1))]
-    result = []
-    for term in terms:
-        pattern = re.compile(r"(?<![a-z0-9_])" + re.escape(term) + r"(?![a-z0-9_])") if term.isascii() else None
-        result.append(max((weight for text, weight in fields
-                           if (pattern.search(text) if pattern else term in text)), default=0))
+@lru_cache(maxsize=8192)
+def _tokens(text):
+    from .search import query_terms
+    terms = query_terms(text)
+    # 경로의 하이픈·점 경계도 검색하되 식별자 원형은 보존한다.
+    return frozenset(terms + [part for t in terms for part in re.split(r"[.+-]", t)
+                              if len(part) > 1])
+
+
+def field_terms(entry):
+    result = {}
+    for key, weight in (("title", 1.0), ("description", .85), ("tags", .65),
+                        ("path", .5), ("body", .2)):
+        for term in _tokens(str(entry.get(key) or "")):
+            result[term] = max(result.get(term, 0), weight)
     return result
 
 
-def normalized(entry, terms):
-    evidence = weights(entry, terms)
-    if not evidence:
+def weights(entry, terms):
+    evidence = field_terms(entry)
+    return [6 * evidence.get(t, 0) for t in terms]
+
+
+class Corpus:
+    """권한과 scope 필터를 적용한 전체 문서로만 IDF를 계산한다."""
+
+    def __init__(self, docs):
+        self.fields = [field_terms(d) for d in docs]
+        self.df = Counter(t for fields in self.fields for t in fields)
+        self.n = len(docs)
+        self.postings = defaultdict(dict)
+        self.positions = {id(f): i for i, f in enumerate(self.fields)}
+        for i, fields in enumerate(self.fields):
+            for term, weight in fields.items():
+                self.postings[term][i] = weight
+        self._matches = {}
+
+    def matches(self, term):
+        if term not in self._matches:
+            found = dict(self.postings.get(term, {}))
+            if not term.isascii():
+                for token, postings in self.postings.items():
+                    if term in token:
+                        for i, weight in postings.items():
+                            found[i] = max(found.get(i, 0), weight)
+            self._matches[term] = found
+        return self._matches[term]
+
+    def idf(self, term):
+        df = len(self.matches(term))
+        if not df:
+            return 0.0
+        # 작은 코퍼스에서도 한 문서의 정확한 검색은 유지한다.
+        rarity = math.log1p(self.n / df)
+        if self.n >= 20:
+            rarity *= (1 - df / self.n) ** 2
+        return rarity
+
+    def score(self, fields, terms):
+        terms = set(terms)
+        weighted = {t: self.idf(t) for t in terms}
+        total = sum(weighted.values())
+        if not total:
+            return 0.0
+        position = self.positions.get(id(fields))
+        evidence = {t: self.matches(t).get(position, 0) if position is not None else
+                    max((w for token, w in fields.items() if token == t or
+                         (not t.isascii() and t in token)), default=0) for t in terms}
+        support = sum(evidence[t] * v for t, v in weighted.items())
+        # 한 단어의 우연한 매칭만으로 완전 일치가 되지 않는다.
+        matches = sum(evidence[t] > 0 for t in terms)
+        confidence = min(1.0, matches / 2)
+        if sum(v > 0 for v in weighted.values()) == 1:
+            confidence *= .2
+        score = .95 * support / total * confidence
+        # 알려진 질의어가 하나뿐인 문장은 정규화 분모도 하나여서 과신하기 쉽다.
+        # 검색 결과는 유지하되 자동 주입의 증거로는 충분하지 않다.
+        return min(score, .02) if sum(v > 0 for v in weighted.values()) == 1 else score
+
+    def scores(self, query):
+        from .search import query_terms
+        full = query_terms(query)
+        # 여러 과제를 담은 장문은 문장별 커버리지의 최댓값을 쓴다.
+        # 문장 개수나 반복 횟수를 더하지 않으므로 증거가 포화하지 않는다.
+        groups = [full]
+        for sentence in re.split(r"(?<=[?!。])\s*|(?<=\.)\s+|\n+", query):
+            terms = query_terms(sentence)
+            if len(terms) >= 3 and terms != full:
+                groups.append(terms)
+        result = []
+        for fields in self.fields:
+            whole = self.score(fields, full)
+            best = max((self.score(fields, terms) for terms in groups), default=0.0)
+            # 짧은 문장의 우연한 일치도 전체 질의 문맥으로 제한한다.
+            result.append(math.sqrt(whole * best))
+        return result
+
+
+def normalized(entry, terms, corpus=None):
+    corpus = corpus if corpus is not None else Corpus([entry])
+    return corpus.score(field_terms(entry), terms)
+
+
+def duplicate_similarity(left, right, corpus=None):
+    """제목·설명 토큰의 양방향 IDF 커버리지 조화평균. 본문·경로는 제외."""
+    a = _tokens(' '.join(str(left.get(k) or '') for k in ('title', 'description')))
+    b = _tokens(' '.join(str(right.get(k) or '') for k in ('title', 'description')))
+    if not a or not b:
         return 0.0
-    # 장문의 자연어 질의를 불리하게 만들지 않고 독립적인 단어 증거를 누적한다.
-    strength = sum(evidence) * sum(w > 0 for w in evidence)
-    return -math.expm1(-strength / 24)
+    corpus = corpus if corpus is not None else Corpus([left, right])
+    # 새 문서의 미등록 단어도 분모에 포함한다. 알려진 한 단어로 중복이 되면 안 된다.
+    def mass(ts):
+        return sum(corpus.idf(t) or math.log1p(max(1, corpus.n)) for t in ts)
+    common = mass(a & b)
+    return 2 * common / (mass(a) + mass(b))
 
 
-DEFAULT_MIN_SCORE = {"files": 0.22119921692859515, "postgres": 0.22119921692859515}
+def citation_signals(doc, answer, corpus, n=8, ratio=.5):
+    """명시 인용과 핵심어 일치를 구분해 근거를 반환한다."""
+    from pathlib import Path
+    path = doc.get('path', '')
+    signals = []
+    for kind, alias in [('path', path), ('filename', Path(path).name), ('title', doc.get('title', ''))]:
+        if alias and alias not in ('index.md', 'log.md') and alias in answer:
+            signals.append({'kind': kind, 'value': alias})
+    terms = _tokens(' '.join(str(doc.get(k) or '') for k in ('title', 'description')))
+    keys = sorted((t for t in terms if corpus.idf(t) > 0 and
+                   (corpus.n < 20 or corpus.df[t] / corpus.n <= .1)),
+                  key=lambda t: (-corpus.idf(t), t))[:n]
+    found = sorted(set(keys) & _tokens(answer))
+    if len(found) >= max(3, math.ceil(len(keys) * ratio)):
+        signals.append({'kind': 'keywords', 'matched': found, 'total': len(keys),
+                        'coverage': len(found) / len(keys)})
+    return signals
+
+
+DEFAULT_MIN_SCORE = {"files": .085, "postgres": .085}
+DEFAULT_DUPLICATE_SCORE = .045
 
 
 def minimum(backend):

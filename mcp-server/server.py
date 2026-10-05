@@ -5,7 +5,6 @@ Claude Library MCP Server
 
 import os
 import re
-import math
 import time
 from pathlib import Path
 from mcp.server.fastmcp import FastMCP
@@ -109,21 +108,16 @@ def _build_index() -> list[dict]:
 def _search(query: str, include_deprecated=False, k=7) -> list[dict]:
     """문서 단위 IDF·필드 가중치로 정렬하고 독립적인 관련도 점수를 반환한다."""
     from kb.search import query_terms
-    from kb.relevance import weights, normalized
+    from kb.relevance import Corpus
     index = [e for e in _build_index() if include_deprecated or e["status"] != "deprecated"]
     terms = query_terms(query)
     if not terms or k <= 0:
         return []
-    evidence = [weights(e, terms) for e in index]
-    idfs = [math.log1p(len(index) / max(1, sum(w[i] > 0 for w in evidence)))
-            for i in range(len(terms))]
-    scored = []
-    for entry, values in zip(index, evidence):
-        rank_score = sum(w * idf for w, idf in zip(values, idfs)) * sum(w > 0 for w in values)
-        if rank_score:
-            scored.append((rank_score, {**entry, "score": normalized(entry, terms)}))
-    scored.sort(key=lambda item: (-item[0], item[1]["path"]))
-    return [entry for _, entry in scored[:k]]
+    corpus = Corpus(index)
+    scored = [{**entry, "score": score}
+              for entry, score in zip(index, corpus.scores(query))]
+    return sorted((e for e in scored if e['score'] > 0),
+                  key=lambda e: (-e['score'], e['path']))[:k]
 
 
 def _safe_path(rel_path: str):
@@ -225,6 +219,9 @@ def _parse_frontmatter(text: str) -> dict:
         return {}
     meta = {}
     for line in text[3:end].splitlines():
+        # 중첩 sources의 title이 최상위 제목을 덮어쓰지 않게 한다.
+        if line[:1].isspace():
+            continue
         line = line.strip()
         if not line or line.startswith("#") or ":" not in line:
             continue
