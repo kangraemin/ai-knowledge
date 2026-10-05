@@ -59,13 +59,25 @@ stages:
   verify:
     on_fail: implement
     steps:
+      # 자기신고(inject + blocking)는 사람 턴을 요구해 '묻지 말고 진행' 작업이 매번 멈췄다.
+      # 통과 조건은 엔진이 직접 실행한 결과(exit 0)로 판정한다.
       - label: 검증 보고
-        blocking: true
         inject: |
           [verify] 검증 단계다. 추측 금지 — 실제로 실행해서 확인한다.
-            1. 이 프로젝트의 테스트 / 빌드 / 린트를 실행한다.
+            1. `bouncer run 'verify/설치 테스트'` 와 `bouncer run 'verify/파이썬 테스트'` 를 실행한다.
             2. 실행한 명령어와 출력을 사용자에게 보고한다.
             3. 실패한 것을 통과로 보고하지 않는다.
+
+      - label: 설치 테스트
+        run: "bats tests/install.bats"
+        timeout: 900
+        blocking: true
+
+      # KB_TEST_DATABASE_URL 이 없으면 Postgres 테스트는 skip 된다.
+      - label: 파이썬 테스트
+        run: "cd mcp-server && uv run -q --extra postgres --with pytest pytest -q"
+        timeout: 900
+        blocking: true
 
       # 프로젝트 검증 명령을 여기에 추가하면 hook이 실행 결과를 직접 관찰한다.
       # 자기 보고와 달리 모델이 우회할 수 없다.
