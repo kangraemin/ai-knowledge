@@ -25,6 +25,7 @@ BRANCH="${LEARNINGS_BRANCH:-${BRANCH_OPTION:-$(cat "$BRANCH_FILE" 2>/dev/null ||
 [[ "$BRANCH" =~ ^[A-Za-z0-9._/-]+$ ]] && [[ "$BRANCH" != *..* ]] || { echo "잘못된 브랜치명" >&2; exit 1; }
 PROFILE="${LEARNINGS_PROFILE:-${PROFILE_OPTION:-$(cat "$PROFILE_FILE" 2>/dev/null || echo user)}}"
 case "$PROFILE" in user|maintainer) ;; *) echo "잘못된 프로필" >&2; exit 1 ;; esac
+export LEARNINGS_PROFILE="$PROFILE"  # policy-changelog.py 가 이력 기록 여부를 프로필로 판단
 if [ -n "$PROFILE_OPTION" ]; then
   mkdir -p "$(dirname "$PROFILE_FILE")"
   if [ "$PROFILE_OPTION" = user ]; then

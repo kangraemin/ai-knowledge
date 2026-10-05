@@ -1453,18 +1453,18 @@ policy_entry() {
   echo '새 분류 규칙' >> "$SOURCE_DIR/TAXONOMY.md"
   sed 's/<!-- learnings-for-claude:rules end -->/새 관리 규칙\n<!-- learnings-for-claude:rules end -->/' "$SOURCE_DIR/templates/claude-rules.md" > "$TEST_HOME/rules"
   mv "$TEST_HOME/rules" "$SOURCE_DIR/templates/claude-rules.md"
-  bash "$SOURCE_DIR/update.sh"
+  LEARNINGS_PROFILE=maintainer bash "$SOURCE_DIR/update.sh"
   for doc in "$LIB_DIR/GUIDE.md" "$LIB_DIR/TAXONOMY.md" "$LIB_DIR/decisions/_global/changelog/claude-md.md"; do
     [ "$(grep -c '· process:update.sh ·' "$doc")" -eq 1 ]
     grep -q '이유: learnings-for-claude main@.* 템플릿 갱신' "$doc"
     cp "$doc" "$doc.test-copy"
   done
-  bash "$SOURCE_DIR/update.sh"
+  LEARNINGS_PROFILE=maintainer bash "$SOURCE_DIR/update.sh"
   for doc in "$LIB_DIR/GUIDE.md" "$LIB_DIR/TAXONOMY.md" "$LIB_DIR/decisions/_global/changelog/claude-md.md"; do
     cmp "$doc" "$doc.test-copy"
   done
   echo '다음 가이드 규칙' >> "$SOURCE_DIR/GUIDE.md"
-  bash "$SOURCE_DIR/update.sh"
+  LEARNINGS_PROFILE=maintainer bash "$SOURCE_DIR/update.sh"
   [ "$(grep -c '· process:update.sh ·' "$LIB_DIR/GUIDE.md")" -eq 2 ]
   grep -qF -- "$(grep '· process:update.sh ·' "$LIB_DIR/GUIDE.md.test-copy")" "$LIB_DIR/GUIDE.md"
 }
@@ -1526,4 +1526,15 @@ DOC
   bash "$TEST_HOME/remove.sh" "$TEST_HOME" < /dev/null
   [ ! -e "$CLAUDE_DIR/hooks/.learnings-profile" ]
   [ ! -e "$CLAUDE_DIR/hooks/.learnings-usage-log" ]
+}
+
+@test "TC-124: user profile update changes policy docs without writing change history" {
+  install_with_input 1
+  echo '새 가이드 규칙' >> "$SOURCE_DIR/GUIDE.md"
+  sed 's/<!-- learnings-for-claude:rules end -->/새 관리 규칙\n<!-- learnings-for-claude:rules end -->/' "$SOURCE_DIR/templates/claude-rules.md" > "$TEST_HOME/rules"
+  mv "$TEST_HOME/rules" "$SOURCE_DIR/templates/claude-rules.md"
+  LEARNINGS_PROFILE=user bash "$SOURCE_DIR/update.sh"
+  grep -q '새 관리 규칙' "$CLAUDE_DIR/CLAUDE.md"
+  [ ! -e "$LIB_DIR/decisions/_global/changelog" ]
+  ! grep -q '· process:update.sh ·' "$LIB_DIR/GUIDE.md"
 }

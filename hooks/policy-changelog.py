@@ -101,6 +101,9 @@ def toc_only(before, after):
 
 
 def append(path, version, what):
+    # 변경 이력은 메인테이너 전용이다. 일반 사용자 라이브러리에 _global/changelog 를 만들지 않는다.
+    if os.environ.get('LEARNINGS_PROFILE', 'user') != 'maintainer':
+        return
     dest = location(path)
     dest.parent.mkdir(parents=True, exist_ok=True)
     text = read(dest)
