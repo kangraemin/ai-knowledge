@@ -1551,9 +1551,14 @@ DOC
     bash "$SOURCE_DIR/update.sh"
     [ ! -e "$CLAUDE_DIR/hooks/library-autoinject.sh" ]
     jq -e '[.hooks.UserPromptSubmit[].hooks[] | select(.command | contains("library-autoinject"))] | length == 0' "$SETTINGS"
-    jq -e '[.hooks.PostToolUse[].hooks[] | select(.command | endswith("/library-trigger.sh"))] | length == 1 and .[0].timeout == 5' "$SETTINGS"
-    jq -e '[.hooks.PostToolUseFailure[].hooks[] | select(.command | endswith("/library-trigger.sh"))] | length == 1' "$SETTINGS"
+    if [ "$profile" = maintainer ]; then n=1; else n=0; fi
+    jq -e --argjson n "$n" '[.hooks.PostToolUse[]?.hooks[] | select(.command | endswith("/library-trigger.sh"))] | length == $n and ($n == 0 or .[0].timeout == 5)' "$SETTINGS"
+    jq -e --argjson n "$n" '[.hooks.PostToolUseFailure[]?.hooks[] | select(.command | endswith("/library-trigger.sh"))] | length == $n' "$SETTINGS"
+    if [ "$n" = 1 ]; then [ -e "$CLAUDE_DIR/hooks/library-trigger.py" ]; else [ ! -e "$CLAUDE_DIR/hooks/library-trigger.py" ]; fi
   done
+  LIBRARY_TRIGGER=1 LEARNINGS_PROFILE=user bash "$SOURCE_DIR/update.sh"
+  jq -e '[.hooks.PostToolUse[].hooks[] | select(.command | endswith("/library-trigger.sh"))] | length == 1' "$SETTINGS"
+  export LEARNINGS_PROFILE=maintainer
   install_with_input 1
   [ ! -e "$CLAUDE_DIR/hooks/library-autoinject.sh" ]
   sed 's|</dev/tty||g' "$SOURCE_DIR/uninstall.sh" > "$TEST_HOME/uninstall.sh"

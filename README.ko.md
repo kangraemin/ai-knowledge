@@ -262,7 +262,7 @@ bash update.sh --branch main
 
 프롬프트 자동 주입은 기본 off입니다. 설치·업데이트는 기존 등록과 설치 파일을 제거하며, `LIBRARY_AUTOINJECT=1`로 실행하면 옵트인합니다. 양쪽 설정 파일의 기존 MCP 항목에는 다른 키를 보존하며 `alwaysLoad: true`를 적용합니다.
 
-순간 검색 훅은 Bash 실패(`PostToolUseFailure` 포함), `dev-bounce`/`bouncer start`, 새 라이브러리 Markdown 작성 시 실행합니다. 새 문서는 기존 kb 대칭 유사도로 중복을 확인합니다. 제한 시간 5초, 실패 시 조용한 종료, 세션별 동일 오류 1회, `.activity`에 `source=trigger:error|start|write`를 기록합니다. user/maintainer 공통이며 uninstall 시 제거합니다. CLI 순서는 `LIBRARY_KB_CMD` → 설치된 CLI → 저장된 uvx spec입니다.
+순간 검색 훅은 Bash 실패(`PostToolUseFailure` 포함), `dev-bounce`/`bouncer start`, 새 라이브러리 Markdown 작성 시 실행합니다. 새 문서는 기존 kb 대칭 유사도로 중복을 확인합니다. 제한 시간 5초, 실패 시 조용한 종료, 세션별 동일 오류 1회, `.activity`에 `source=trigger:error|start|write`를 기록합니다. 기본 설치는 maintainer 프로필만이며 `LIBRARY_TRIGGER=1`로 user에도 켜고 `0`으로 끕니다. uninstall 시 제거합니다. CLI 순서는 `LIBRARY_KB_CMD` → 설치된 CLI → 저장된 uvx spec입니다.
 
 공식 문서: [alwaysLoad](https://code.claude.com/docs/en/mcp#exempt-a-server-from-deferral), [PostToolUse](https://code.claude.com/docs/en/hooks#posttooluse), [PostToolUseFailure](https://code.claude.com/docs/en/hooks#posttoolusefailure). Bash 공식 응답 필드는 `stdout/stderr/interrupted/isImage`이며 exit code는 있을 때 검사합니다. 실패 이벤트는 최상위 `error`를 사용하며 두 이벤트 모두 `additionalContext`를 지원합니다.
 
