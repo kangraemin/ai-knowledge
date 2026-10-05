@@ -8,3 +8,4 @@ mcp-server/.venv/
 
 # 로컬 전용 설정
 .claude/settings.local.json
+__pycache__/
