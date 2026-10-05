@@ -30,12 +30,36 @@ def root():
     return Path(os.environ.get("LIBRARY_ROOT", Path.home() / "claude-library"))
 
 
+def runtime_version():
+    """로그 한 줄이 어떤 코드·기준값으로 만들어졌는지 구분하는 표식."""
+    import hashlib
+    from importlib import metadata
+    try:
+        pkg = metadata.version("claude-library-mcp")
+    except Exception:
+        pkg = "unknown"
+    try:
+        install = (Path.home() / ".claude/hooks/.learnings-version").read_text().strip()
+    except OSError:
+        install = "unknown"
+    try:
+        from . import relevance
+        gate = {k: getattr(relevance, k) for k in sorted(dir(relevance))
+                if k.isupper() and isinstance(getattr(relevance, k), (int, float, dict))}
+        gate_hash = hashlib.sha256(json.dumps(gate, sort_keys=True).encode()).hexdigest()[:8]
+    except Exception:
+        gate_hash = "unknown"
+    return {"pkg": pkg, "install": install, "gate": gate_hash,
+            "autoinject": os.environ.get("LIBRARY_AUTOINJECT", "0")}
+
+
 def append(event, library_root=None):
     if os.environ.get("LIBRARY_LOG") == "0" or mode() == "off":
         return
     try:
         now = datetime.now(timezone.utc)
         record = redact({"ts": now.isoformat(), **event}, "query")
+        record.setdefault("version", runtime_version())
         session = os.environ.get("LIBRARY_SESSION_ID")
         if session:
             record.setdefault("session_id", session)

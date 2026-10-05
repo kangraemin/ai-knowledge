@@ -50,6 +50,7 @@ def append_turn(row, root=None):
                 for old in records('usage-*.jsonl', root or activity.root())
             ):
                 return False
+            row.setdefault('version', activity.runtime_version())
             with (folder / f'usage-{datetime.now(timezone.utc):%Y-%m}.jsonl').open('a') as stream:
                 stream.write(json.dumps(row, ensure_ascii=False, default=str) + '\n')
             return True
@@ -296,6 +297,18 @@ def log_usage(transcript, session='', cwd=''):
     return row
 
 
+
+def by_version(rows):
+    """설치 버전·판정 기준값별로 턴 라벨을 나눈다. 버전 표식이 없는 옛 기록은 'unversioned'."""
+    groups = {}
+    for r in rows:
+        v = r.get('version') or {}
+        key = f"{v.get('install', 'unversioned')} gate={v.get('gate', '?')}" if v else 'unversioned'
+        g = groups.setdefault(key, {'turns': 0, 'labels': Counter()})
+        g['turns'] += 1
+        g['labels'].update(r.get('labels', []))
+    return {k: {'turns': g['turns'], 'labels': dict(g['labels'])} for k, g in groups.items()}
+
 def report(days=30, root=None):
     if days <= 0:
         raise ValueError('days는 양수여야 합니다')
@@ -351,7 +364,7 @@ def report(days=30, root=None):
             'duplicate_write_count': len(duplicates), 'duplicate_writes': duplicates,
             'documents': {k: [{'path': p, 'count': n} for p, n in c.most_common(10)] for k, c in [('exposed', exposed), ('read', read), ('cited', cited)]},
             'dead_knowledge': {**ratio(len(dead), len(docs)), 'paths': sorted(dead)},
-            'category_hits': dict(categories), 'repos': dict(repos), 'daily': {k: dict(v) for k, v in sorted(daily.items())},
+            'category_hits': dict(categories), 'repos': dict(repos), 'by_version': by_version(valid), 'daily': {k: dict(v) for k, v in sorted(daily.items())},
             'search_latency_ms': activity.stats(days, root)['latency_ms'],
             'latency_ms': {'count': len(latencies), 'p50': activity.percentile(latencies, .5), 'p95': activity.percentile(latencies, .95)},
             'recent_missed': sorted(missed, key=lambda r: r['ts'], reverse=True)[:10]}

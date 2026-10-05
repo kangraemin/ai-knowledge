@@ -155,6 +155,10 @@ def run(payload):
                 record['query'] = query
             else:
                 record.update(query_sha256=hashlib.sha256(query.encode()).hexdigest()[:16], query_len=len(query))
+            # 같은 검색의 판정 기준값(gate 해시)은 CLI 가 남기는 source=trigger 기록에 있다.
+            version_file = Path.home() / '.claude/hooks/.learnings-version'
+            record['version'] = {'install': version_file.read_text().strip() if version_file.exists() else 'unknown',
+                                 'autoinject': os.environ.get('LIBRARY_AUTOINJECT', '0')}
             with (root / ('search-' + now.strftime('%Y-%m') + '.jsonl')).open('a') as stream:
                 fcntl.flock(stream, fcntl.LOCK_EX)
                 stream.write(json.dumps(record, ensure_ascii=False) + '\n')

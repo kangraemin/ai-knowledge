@@ -205,3 +205,21 @@ def test_negative_fixture_is_public_and_split():
     assert len(rows) == 30 and len({r["q"] for r in rows}) == 30
     assert sum(r["split"] == "dev" for r in rows) == 15
     assert sum(r["split"] == "test" for r in rows) == 15
+
+
+def test_runtime_version_stamps_install_and_gate(tmp_path, monkeypatch):
+    from kb.activity import runtime_version
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".claude/hooks").mkdir(parents=True)
+    (tmp_path / ".claude/hooks/.learnings-version").write_text("branch@abc1234\n")
+    v = runtime_version()
+    assert v["install"] == "branch@abc1234" and len(v["gate"]) == 8 and v["autoinject"] in ("0", "1")
+
+
+def test_report_groups_turns_by_version():
+    from kb.usage import by_version
+    rows = [{"labels": ["no_need"], "version": {"install": "b@1", "gate": "aaaa"}},
+            {"labels": ["missed"], "version": {"install": "b@2", "gate": "bbbb"}},
+            {"labels": ["no_need"]}]
+    out = by_version(rows)
+    assert out["b@1 gate=aaaa"]["turns"] == 1 and out["unversioned"]["labels"] == {"no_need": 1}
