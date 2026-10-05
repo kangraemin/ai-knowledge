@@ -109,3 +109,52 @@ def test_search_citation_does_not_count_as_injection_citation(tmp_path, monkeypa
     monkeypatch.setattr(usage, 'inventory', lambda *args: [])
     monkeypatch.setattr(usage.activity, 'stats', lambda *args: {'latency_ms': {}})
     assert usage.report(root=tmp_path)['injection_citation_rate']['numerator'] == 0
+
+
+def gate_rows(query, docs):
+    corpus = Corpus(docs)
+    return [{**d, 'score': score, 'injection_evidence': evidence}
+            for d, score, evidence in zip(docs, corpus.scores(query), corpus.injection_evidence(query))]
+
+
+def test_gate_requires_rare_metadata_evidence_not_body_or_tags():
+    from kb.relevance import select
+    query = 'Postgres WAL archive recovery'
+    filler = [{'title': 'ordinary unrelated document'} for _ in range(100)]
+    target = {'path': 'library/restore.md', 'title': query}
+    assert select(gate_rows(query, [target] + filler), 'files', 1500)[0] == gate_rows(query, [target] + filler)[:1]
+    for field in ('body', 'tags'):
+        rows = gate_rows(query, [{'path': 'library/restore.md', field: query}] + filler)
+        assert select(rows, 'files', 1500)[0] == []
+    # 코퍼스 전체에 반복되는 메타데이터 단어는 핵심어가 아니다.
+    assert select(gate_rows(query, [target] * 100), 'files', 1500)[0] == []
+
+
+def test_gate_exact_terms_short_floor_and_override(monkeypatch):
+    from kb.relevance import select
+    row = {'path': 'library/example.md', 'title': 'Synthetic example', 'score': .3,
+           'injection_evidence': {'core_matches': 4, 'query_terms': 20}}
+    assert select([row], 'files', 1500)[0] == [row]
+    short = {**row, 'injection_evidence': {'core_matches': 4, 'query_terms': 4}}
+    assert select([short], 'files', 1500) == ([], 'weak_evidence')
+    assert select([{**short, 'score': .4}], 'files', 1500)[0]
+    monkeypatch.setenv('LIBRARY_AUTOINJECT_MIN_SCORE', '.5')
+    assert select([row], 'files', 1500) == ([], 'low_score')
+    monkeypatch.setenv('LIBRARY_AUTOINJECT_MIN_SCORE', '0')
+    assert select([short], 'files', 1500)[0] == []
+    assert select([{**row, 'injection_evidence': {}}], 'files', 1500)[0] == []
+    assert select([row], 'files', 1) == ([], 'budget')
+
+
+def test_gate_substring_and_repetition_are_not_extra_core_terms():
+    docs = [{'title': '복구절차 백업정책 archive replay'}] + [{'title': 'filler'}] * 100
+    evidence = Corpus(docs).injection_evidence('복구 백업 archive archive replay')[0]
+    assert evidence['core_matches'] == 2
+
+
+def test_gate_metrics_zero_injections_is_not_perfect_precision():
+    from kb.eval.gate import measure
+    data = [{'prompt': 'synthetic query', 'relevant': True, 'expected_paths': ['library/a.md']}]
+    result = measure(data, {'synthetic query': []})
+    assert result['precision'] is None
+    assert result['recall'] == 0

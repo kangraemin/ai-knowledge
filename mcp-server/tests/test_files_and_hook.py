@@ -144,3 +144,24 @@ def test_hook_timeout(tmp_path, monkeypatch):
         timeout=8,
     )
     assert out.returncode == 0 and out.stdout == ""
+
+
+def test_hook_runs_real_cli_evidence_gate(tmp_path, monkeypatch):
+    import sys
+    root = tmp_path / 'hook-library'
+    (root / 'library').mkdir(parents=True)
+    (root / 'library/restore.md').write_text('---\ntitle: Postgres WAL archive recovery\n---\n')
+    for i in range(100):
+        (root / f'library/filler-{i}.md').write_text('---\ntitle: unrelated filler\n---\n')
+    monkeypatch.setenv('LIBRARY_ROOT', str(root))
+    monkeypatch.setenv('LIBRARY_LOG', '0')
+    monkeypatch.setenv('LIBRARY_KB_CMD', f'{sys.executable} -m kb.cli')
+    monkeypatch.setenv('PYTHONPATH', str(Path(__file__).resolve().parents[1]))
+    for prompt, expected in [('Postgres WAL archive recovery', True),
+                             ('continue checking the progress please', False)]:
+        out = subprocess.run(['bash', str(HOOK)], input=json.dumps({'prompt': prompt}),
+                             text=True, capture_output=True, timeout=8)
+        assert out.returncode == 0
+        assert bool(out.stdout.strip()) is expected
+        if expected:
+            assert 'library/restore.md' in json.loads(out.stdout)['hookSpecificOutput']['additionalContext']

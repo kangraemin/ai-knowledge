@@ -114,8 +114,9 @@ def _search(query: str, include_deprecated=False, k=7) -> list[dict]:
     if not terms or k <= 0:
         return []
     corpus = Corpus(index)
-    scored = [{**entry, "score": score}
-              for entry, score in zip(index, corpus.scores(query))]
+    scored = [{**entry, "score": score, "injection_evidence": evidence}
+              for entry, score, evidence in zip(index, corpus.scores(query),
+                                                 corpus.injection_evidence(query))]
     return sorted((e for e in scored if e['score'] > 0),
                   key=lambda e: (-e['score'], e['path']))[:k]
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# 희소어 근거·짧은 질의 강화 게이트는 CLI의 kb.relevance에서 공통 적용한다.
 # 프롬프트를 막지 않는 선택적 검색 주입. macOS에서도 subprocess timeout을 사용한다.
 python3 -c '
 import hashlib, json, os, shlex, shutil, signal, subprocess, sys, time

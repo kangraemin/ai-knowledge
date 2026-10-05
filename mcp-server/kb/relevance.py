@@ -34,6 +34,8 @@ class Corpus:
 
     def __init__(self, docs):
         self.fields = [field_terms(d) for d in docs]
+        self.metadata = [_tokens(" ".join(str(d.get(k) or "") for k in
+                                         ("title", "description", "path"))) for d in docs]
         self.df = Counter(t for fields in self.fields for t in fields)
         self.n = len(docs)
         self.postings = defaultdict(dict)
@@ -84,6 +86,15 @@ class Corpus:
         # 알려진 질의어가 하나뿐인 문장은 정규화 분모도 하나여서 과신하기 쉽다.
         # 검색 결과는 유지하되 자동 주입의 증거로는 충분하지 않다.
         return min(score, .02) if sum(v > 0 for v in weighted.values()) == 1 else score
+
+    def injection_evidence(self, query):
+        """본문·태그 매칭과 구분되는 메타데이터의 정확한 희소어 근거."""
+        from .search import query_terms
+        terms = query_terms(query)
+        rare = {t for t in terms if self.n and
+                0 < len(self.matches(t)) / self.n <= MAX_CORE_DF_RATIO}
+        return [{"core_matches": len(rare & meta), "query_terms": len(terms)}
+                for meta in self.metadata]
 
     def scores(self, query):
         from .search import query_terms
@@ -142,7 +153,11 @@ def citation_signals(doc, answer, corpus, n=8, ratio=.5):
     return signals
 
 
-DEFAULT_MIN_SCORE = {"files": .085, "postgres": .085}
+DEFAULT_MIN_SCORE = {"files": .18, "postgres": .18}
+MAX_CORE_DF_RATIO = .03
+MIN_CORE_MATCHES = 4
+SHORT_QUERY_TERMS = 16
+SHORT_MIN_SCORE = .4
 DEFAULT_DUPLICATE_SCORE = .045
 
 
@@ -157,9 +172,19 @@ def minimum(backend):
 def select(rows, backend, budget):
     from .search import format_results
     threshold = minimum(backend)
-    qualified = [row for row in rows if row.get("score", 0) >= threshold]
+    scored = [row for row in rows if row.get("score", 0) >= threshold]
+    qualified = []
+    for row in scored:
+        # 근거 없는 구버전/외부 결과는 자동 주입에 사용하지 않는다.
+        evidence = row.get("injection_evidence", {})
+        if evidence.get("core_matches", 0) < MIN_CORE_MATCHES:
+            continue
+        if (evidence.get("query_terms", 0) <= SHORT_QUERY_TERMS and
+                row["score"] < max(threshold, SHORT_MIN_SCORE)):
+            continue
+        qualified.append(row)
     if not qualified:
-        return [], "low_score" if rows else "no_results"
+        return [], ("weak_evidence" if scored else "low_score") if rows else "no_results"
     kept = []
     for row in qualified:
         if len(format_results(kept + [row], budget).splitlines()) != len(kept) + 1:

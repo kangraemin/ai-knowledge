@@ -96,6 +96,7 @@ def search(
     ).fetchall()
     corpus = Corpus(documents)
     relevance = {d['id']: score for d, score in zip(documents, corpus.scores(query))}
+    evidence = dict(zip((d['id'] for d in documents), corpus.injection_evidence(query)))
     keyword = sorted(({'id': d['id'], 'score': relevance[d['id']]} for d in documents
                       if relevance[d['id']] > 0), key=lambda r: (-r['score'], str(r['id'])))[:50]
     lists = [keyword]
@@ -129,6 +130,7 @@ def search(
     from .activity import pg_event
     for row in rows:
         row["score"] = relevance.get(row["id"], 0.0)
+        row["injection_evidence"] = evidence[row["id"]]
         row["superseded_by"] = row.pop("frontmatter").get("superseded_by", "")
         row.pop("body", None)
         row.pop("tags", None)

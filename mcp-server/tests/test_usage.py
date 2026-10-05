@@ -17,11 +17,13 @@ from kb.cli import main
 def library(tmp_path):
     root = activity.root()
     (root / 'library/testing').mkdir(parents=True)
-    (root / 'library/testing/backup.md').write_text('---\ntype: Concept\ntitle: database backup recovery\ndescription: database backup recovery\n---\ndatabase backup recovery')
+    (root / 'library/testing/backup.md').write_text('---\ntype: Concept\ntitle: database backup recovery checksum\ndescription: database backup recovery checksum\n---\ndatabase backup recovery checksum')
+    for i in range(100):
+        (root / f"library/testing/noise-{i}.md").write_text("---\ntitle: unrelated filler\n---\nnoise")
     return root
 
 
-def transcript(tmp_path, prompt='database backup recovery', tools=(), answer='', previous=False):
+def transcript(tmp_path, prompt='database backup recovery checksum', tools=(), answer='', previous=False):
     rows = []
     if previous:
         rows.extend([{'type': 'user', 'message': {'content': 'old turn'}}, {'type': 'assistant', 'message': {'content': 'old answer'}}])
@@ -42,18 +44,18 @@ DOC = 'library/testing/backup.md'
 
 @pytest.mark.parametrize('kind,expected', [('used', 'hit_used'), ('unused', 'hit_unused'), ('missed', 'missed'), ('empty', 'searched_empty'), ('none', 'no_need'), ('duplicate', 'duplicate_write')])
 def test_labels(tmp_path, library, kind, expected):
-    tools, answer, prompt = [], '', 'database backup recovery'
+    tools, answer, prompt = [], '', 'database backup recovery checksum'
     if kind in ('used', 'unused'):
-        tools.append((SEARCH, {'query': prompt}, f'- database backup recovery `{DOC}`'))
+        tools.append((SEARCH, {'query': prompt}, f'- database backup recovery checksum `{DOC}`'))
     if kind == 'used':
-        tools.append((READ, {'path': DOC}, 'database backup recovery'))
+        tools.append((READ, {'path': DOC}, 'database backup recovery checksum'))
         answer = f'📚 library 참조: {DOC}'
     if kind == 'empty':
         tools.append((SEARCH, {'query': 'unrelated'}, '관련 라이브러리 항목 없음.'))
     if kind == 'none':
         prompt = 'quuxzebra'
     if kind == 'duplicate':
-        tools.append(('Write', {'file_path': str(library / 'library/new.md'), 'content': '---\ntitle: database backup recovery\n---\ncontent'}, 'File created successfully'))
+        tools.append(('Write', {'file_path': str(library / 'library/new.md'), 'content': '---\ntitle: database backup recovery checksum\n---\ncontent'}, 'File created successfully'))
     row = usage.log_usage(transcript(tmp_path, prompt, tools, answer, previous=True), 'session', '/tmp/project')
     assert row['labels'] == (['missed', 'duplicate_write'] if kind == 'duplicate' else [expected])
     assert row['prompt_sha256'] == activity.digest(prompt)
@@ -63,8 +65,8 @@ def test_labels(tmp_path, library, kind, expected):
 
 def test_join_latest_session_and_stale(tmp_path, library, monkeypatch):
     monkeypatch.setenv('LIBRARY_SESSION_ID', 'session')
-    activity.search_event('database backup recovery', [{'path': DOC, 'score': .9}], 'files', 1, injected=True, action='inject')
-    activity.append({'session_id': 'other', 'action': 'inject', 'query': 'database backup recovery', 'injected': False})
+    activity.search_event('database backup recovery checksum', [{'path': DOC, 'score': .9}], 'files', 1, injected=True, action='inject')
+    activity.append({'session_id': 'other', 'action': 'inject', 'query': 'database backup recovery checksum', 'injected': False})
     path = transcript(tmp_path, answer='backup.md')
     row = usage.log_usage(path, 'session')
     assert row['autoinject']['injected']
@@ -111,7 +113,7 @@ def test_report_arithmetic_and_save(tmp_path, library, capsys):
     assert result['contact_rate']['rate'] == pytest.approx(1/3)
     assert result['missed_rate']['rate'] == .5
     assert result['search_success_rate']['rate'] == 1
-    assert result['dead_knowledge']['numerator'] == 0
+    assert result['dead_knowledge']['numerator'] == 100
     assert result['documents']['cited'] == [{'path': DOC, 'count': 1}]
     assert len(result['recent_missed']) == 1
     assert main(['report', '--format', 'json']) == 0
@@ -159,10 +161,10 @@ def test_pg_turn_payload_and_rls(db, as_user, tmp_path, library, monkeypatch):
 def test_report_injection_empty_duplicates_and_window(tmp_path, library, monkeypatch):
     from datetime import timedelta
     monkeypatch.setenv('LIBRARY_SESSION_ID', 's')
-    activity.search_event('database backup recovery', [{'path': DOC, 'score': .9}], 'files', 42, injected=True, action='inject')
+    activity.search_event('database backup recovery checksum', [{'path': DOC, 'score': .9}], 'files', 42, injected=True, action='inject')
     usage.log_usage(transcript(tmp_path, answer=DOC), 's', '/tmp/repo')
     usage.log_usage(transcript(tmp_path, tools=[(SEARCH, {'query': 'absent'}, '[]')]), 'other', '/tmp/repo')
-    usage.log_usage(transcript(tmp_path, tools=[('Write', {'file_path': str(library / 'library/new.md'), 'content': '---\ntitle: database backup recovery\n---'}, 'created')]), 'other', '/tmp/repo')
+    usage.log_usage(transcript(tmp_path, tools=[('Write', {'file_path': str(library / 'library/new.md'), 'content': '---\ntitle: database backup recovery checksum\n---'}, 'created')]), 'other', '/tmp/repo')
     usage.append_turn({'ts': (datetime.now(timezone.utc)-timedelta(days=60)).isoformat(), 'labels': ['parse_error']})
     usage.append_turn({'ts': datetime.now(timezone.utc).isoformat(), 'labels': ['parse_error']})
     result = usage.report(7)
@@ -191,9 +193,9 @@ def test_hook_real_cli(tmp_path, library):
 def test_flattened_transcript_decisions_and_title(tmp_path, library):
     path = tmp_path / 'flat.jsonl'
     rows = [
-        {'role': 'user', 'content': 'database backup recovery'},
+        {'role': 'user', 'content': 'database backup recovery checksum'},
         {'role': 'assistant', 'content': [{'type': 'tool_use', 'name': READ, 'id': 'one', 'input': {'path': DOC}}, {'type': 'tool_use', 'name': 'mcp__claude-library__decision_list', 'id': 'two', 'input': {'repo': 'repo'}}]},
-        {'role': 'assistant', 'content': 'database backup recovery'},
+        {'role': 'assistant', 'content': 'database backup recovery checksum'},
     ]
     path.write_text('\n'.join(json.dumps(r) for r in rows))
     row = usage.log_usage(path)
@@ -206,7 +208,7 @@ def test_flattened_transcript_decisions_and_title(tmp_path, library):
 def test_six_user_kinds_and_duplicate(tmp_path, library, legacy):
     # 실제 메시지 구조를 재현하되 내용은 합성 데이터만 사용한다.
     rows = [
-        {'type': 'user', 'uuid': 'human-one', 'origin': {'kind': 'human'}, 'promptSource': 'queued', 'turnOrigin': 'human', 'message': {'content': 'database backup recovery'}},
+        {'type': 'user', 'uuid': 'human-one', 'origin': {'kind': 'human'}, 'promptSource': 'queued', 'turnOrigin': 'human', 'message': {'content': 'database backup recovery checksum'}},
         {'type': 'user', 'origin': {'kind': 'task-notification', 'producer': 'session-task'}, 'promptSource': 'system', 'turnOrigin': 'task_notification', 'message': {'content': '<task-notification>completed</task-notification>'}},
         {'type': 'user', 'isMeta': True, 'message': {'content': 'Stop hook feedback: retry'}},
         {'type': 'user', 'isMeta': True, 'message': {'content': [{'type': 'text', 'text': 'skill body'}]}},
@@ -223,7 +225,7 @@ def test_six_user_kinds_and_duplicate(tmp_path, library, legacy):
     path.write_text('\n'.join(json.dumps(r) for r in rows))
     result = usage.log_usage(path, 's')
     assert result['turn_id'] == 'human-one' and result['labels'] == ['hit_used']
-    assert result['prompt_sha256'] == activity.digest('database backup recovery')
+    assert result['prompt_sha256'] == activity.digest('database backup recovery checksum')
     usage.log_usage(path, 's')
     assert len(list(usage.records('usage-*.jsonl', library))) == 1
     usage.log_usage(path, 'another-session')
@@ -233,7 +235,7 @@ def test_six_user_kinds_and_duplicate(tmp_path, library, legacy):
 @pytest.mark.parametrize('mode', ['aggregate', 'full', 'off'])
 def test_privacy_modes(tmp_path, library, monkeypatch, mode):
     monkeypatch.setenv('LIBRARY_USAGE_LOG', mode)
-    prompt = 'database backup recovery'
+    prompt = 'database backup recovery checksum'
     activity.search_event(prompt, [], 'files', 1)
     result = usage.log_usage(transcript(tmp_path, tools=[(SEARCH, {'query': prompt}, '[]')]), 's')
     events = list(usage.records('search-*.jsonl', library))
@@ -266,5 +268,5 @@ def test_system_autoinject(tmp_path, library, payload):
 def test_aggregate_report(tmp_path, library):
     usage.log_usage(transcript(tmp_path), 's')
     missed = usage.report()['recent_missed'][0]
-    assert 'prompt' not in missed and missed['prompt_len'] == len('database backup recovery')
-    assert missed['prompt_sha256'] == activity.digest('database backup recovery')
+    assert 'prompt' not in missed and missed['prompt_len'] == len('database backup recovery checksum')
+    assert missed['prompt_sha256'] == activity.digest('database backup recovery checksum')

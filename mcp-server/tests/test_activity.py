@@ -20,8 +20,10 @@ def files(tmp_path, monkeypatch):
     monkeypatch.setenv("LIBRARY_ROOT", str(root))
     monkeypatch.setattr(server, "LIBRARY_ROOT", root)
     monkeypatch.setattr(server, "_index_cache", None)
-    (root / "library/new.md").write_text("---\ntype: Concept\ntitle: 데이터베이스 백업 복구\n---\n데이터베이스 백업 복구")
+    (root / "library/new.md").write_text("---\ntype: Concept\ntitle: 데이터베이스 백업 복구 체크섬\n---\n데이터베이스 백업 복구 체크섬")
     (root / "library/old.md").write_text("---\ntype: Concept\ntitle: 데이터베이스 백업\nstatus: deprecated\nsuperseded_by: library/new.md\n---\n옛 내용")
+    for i in range(100):
+        (root / f"library/noise-{i}.md").write_text("---\ntitle: unrelated filler\n---\nnoise")
     return server, root
 
 
@@ -57,13 +59,13 @@ def test_log_disabled_and_broken_destination(files, monkeypatch):
 def test_cli_threshold_budget_and_stats(files, monkeypatch, capsys):
     _, root = files
     monkeypatch.setenv("LIBRARY_AUTOINJECT_MIN_SCORE", "1")
-    assert main(["search", "--format", "inject", "데이터베이스 백업"]) == 0
+    assert main(["search", "--format", "inject", "데이터베이스 백업 복구 체크섬"]) == 0
     assert capsys.readouterr().out == ""
     assert events(root)[-1]["skipped_reason"] == "low_score"
     monkeypatch.setenv("LIBRARY_AUTOINJECT_MIN_SCORE", "0")
-    assert main(["search", "--format", "inject", "--budget", "1", "백업"]) == 0
+    assert main(["search", "--format", "inject", "--budget", "1", "데이터베이스 백업 복구 체크섬"]) == 0
     assert events(root)[-1]["skipped_reason"] == "budget"
-    assert main(["search", "--format", "inject", "데이터베이스 백업"]) == 0
+    assert main(["search", "--format", "inject", "데이터베이스 백업 복구 체크섬"]) == 0
     assert "new.md" in capsys.readouterr().out
     assert events(root)[-1]["injected"] is True
     assert main(["search", "--format", "json", "백업"]) == 0
@@ -111,7 +113,7 @@ def test_hook_real_cli_session_and_skip(files, monkeypatch):
     hook = Path(__file__).resolve().parents[2] / "hooks/library-autoinject.sh"
     monkeypatch.setenv("LIBRARY_KB_CMD", f"{sys.executable} -m kb.cli")
     monkeypatch.setenv("PYTHONPATH", str(Path(__file__).resolve().parents[1]))
-    result = subprocess.run(["bash", str(hook)], input=json.dumps({"prompt":"데이터베이스 백업 복구", "session_id":"hook-session"}), text=True, capture_output=True)
+    result = subprocess.run(["bash", str(hook)], input=json.dumps({"prompt":"데이터베이스 백업 복구 체크섬", "session_id":"hook-session"}), text=True, capture_output=True)
     assert result.returncode == 0
     assert "new.md" in json.loads(result.stdout)["hookSpecificOutput"]["additionalContext"]
     assert len(events(root)) == 1
@@ -128,7 +130,9 @@ def test_postgres_logging_and_failure_isolation(db, as_user, monkeypatch, tmp_pa
     from psycopg.conninfo import conninfo_to_dict, make_conninfo
     with as_user("a") as conn:
         scope = store.ensure_scope(conn, store.workspace(conn, "test"))
-        store.write(conn, "library/a.md", "---\ntype: Concept\ntitle: 백업 복구\n---\n백업", scope)
+        store.write(conn, "library/a.md", "---\ntype: Concept\ntitle: 백업 복구 아카이브 체크섬\n---\n백업", scope)
+        for i in range(100):
+            store.write(conn, f"library/filler-{i}.md", "---\ntype: Concept\ntitle: unrelated filler\n---\nnoise", scope)
     options = conninfo_to_dict(db.info.dsn)
     options["user"] = "kb_test_a"
     monkeypatch.setenv("LIBRARY_DATABASE_URL", make_conninfo(**options))
@@ -142,7 +146,7 @@ def test_postgres_logging_and_failure_isolation(db, as_user, monkeypatch, tmp_pa
         activity.pg_event(conn, "read", doc_id="not-a-uuid")
         assert search(conn, "백업")[0]["score"] > 0
     assert [e["action"] for e in events(Path(os.environ["LIBRARY_ROOT"]))] == ["search", "read"]
-    assert main(["search", "--format", "inject", "백업 복구"]) == 0
+    assert main(["search", "--format", "inject", "백업 복구 아카이브 체크섬"]) == 0
     with as_user("a") as conn:
         assert conn.execute("SELECT count(*) AS n FROM kb.events WHERE action='inject'").fetchone()["n"] == 1
     monkeypatch.setenv("LIBRARY_LOG", "0")
@@ -163,7 +167,7 @@ def test_concurrent_append_is_complete(tmp_path):
 def test_threshold_boundary_and_budget_rows(monkeypatch):
     score = normalized({"title":"백업 복구"}, ["백업", "복구"])
     monkeypatch.setenv("LIBRARY_AUTOINJECT_MIN_SCORE", str(score))
-    row = {"path":"library/a.md", "title":"백업 복구", "score":score}
+    row = {"path":"library/a.md", "title":"백업 복구", "score":score, "injection_evidence": {"core_matches": 4, "query_terms": 4}}
     assert select([row], "files", 1500) == ([row], None)
     import math
     monkeypatch.setenv("LIBRARY_AUTOINJECT_MIN_SCORE", str(math.nextafter(score, 1)))

@@ -74,7 +74,8 @@ def inventory(root):
 
 def offline(query, docs):
     corpus = Corpus(docs)
-    rows = [{**doc, 'score': score} for doc, score in zip(docs, corpus.scores(query))]
+    rows = [{**doc, 'score': score, 'injection_evidence': evidence}
+            for doc, score, evidence in zip(docs, corpus.scores(query), corpus.injection_evidence(query))]
     return sorted((r for r in rows if r['score'] > 0), key=lambda r: (-r['score'], r['path']))
 
 
@@ -221,6 +222,8 @@ def analyze(transcript, session, cwd, root):
     existing = [d for d in docs if d['path'] not in calls['library_write']]
     opportunity = offline(prompt, existing)
     top_score = max((r['score'] for r in opportunity), default=0)
+    from .relevance import select
+    eligible = bool(select(opportunity[:7], 'files', 1500)[0]) if len(prompt.strip()) >= 8 and not prompt.lstrip().startswith('/') else False
     duplicates = []
     from server import _parse_frontmatter
     for path, content, result_text in writes:
@@ -241,19 +244,19 @@ def analyze(transcript, session, cwd, root):
         labels.append('hit_used')
     if exposed and not calls['library_read'] and not cited_paths:
         labels.append('hit_unused')
-    if top_score >= threshold and not contact:
+    if eligible and not contact:
         labels.append('missed')
     if calls['library_search'] and not unknown and not any(r['score'] >= threshold for r in search_rows):
         labels.append('searched_empty')
     if duplicates:
         labels.append('duplicate_write')
-    if top_score < threshold and not contact:
+    if not eligible and not contact:
         labels.append('no_need')
     return {'prompt': prompt, 'prompt_len': len(prompt), 'turn_id': turn[0].get('uuid'),
             'autoinject': {'injected': injected, 'paths': injected_paths, 'skipped_reason': injection.get('skipped_reason', None if injection else 'no_event')},
             'calls': calls, 'cited': sorted(set(cited)), 'cited_evidence': cited_evidence, 'cited_paths': cited_paths, 'exposed_paths': exposed,
             'search_paths': sorted({r['path'] for r in search_rows}), 'search_unknown': unknown,
-            'opportunity': {'top_score': top_score, 'top_paths': [r['path'] for r in opportunity[:7]], 'threshold': threshold},
+            'opportunity': {'eligible': eligible, 'top_score': top_score, 'top_paths': [r['path'] for r in opportunity[:7]], 'threshold': threshold},
             'duplicates': duplicates, 'labels': labels}
 
 
@@ -323,7 +326,7 @@ def report(days=30, root=None):
         searched += searching
         search_success += bool(searching and (set(r.get('search_paths', [])) & set(calls.get('library_read', []) + r.get('cited_paths', []))))
         opp = r.get('opportunity', {})
-        opportunities += opp.get('top_score', 0) >= opp.get('threshold', minimum('files'))
+        opportunities += opp.get('eligible', opp.get('top_score', 0) >= opp.get('threshold', minimum('files')))
         exposed.update(set(r.get('exposed_paths', [])))
         read.update(set(calls.get('library_read', [])))
         cited.update(set(r.get('cited_paths', [])))
