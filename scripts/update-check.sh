@@ -52,6 +52,14 @@ update_library_mcp() {
     fi
     rm -f "$snapshot" "$tmp"
   done
+  # hook 은 uvx 캐시를 쓰므로 이름만 주면 예전에 받은 버전이 계속 돈다.
+  # main 은 받은 소스의 패키지 버전으로 고정해 hook 과 CLI 옵션이 항상 맞게 한다.
+  local pyproject version
+  pyproject="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)/mcp-server/pyproject.toml"
+  if [ "$spec" = claude-library-mcp ] && [ -f "$pyproject" ]; then
+    version=$(sed -n 's/^version = "\([0-9][0-9A-Za-z.+-]*\)"$/\1/p' "$pyproject" | head -1)
+    [ -n "$version" ] && spec="claude-library-mcp==$version"
+  fi
   mkdir -p "$HOME/.claude/hooks"
   printf '%s\n' "$spec" > "$HOME/.claude/hooks/.learnings-kb-spec"
 }

@@ -18,6 +18,8 @@ setup() {
   mkdir -p "$SOURCE_DIR" "$TEST_HOME/bin"
   cp -R "$REPO_DIR/hooks" "$REPO_DIR/scripts" "$REPO_DIR/skills" "$REPO_DIR/templates" "$SOURCE_DIR/"
   cp "$REPO_DIR/install.sh" "$REPO_DIR/update.sh" "$REPO_DIR/uninstall.sh" "$REPO_DIR/GUIDE.md" "$REPO_DIR/TAXONOMY.md" "$SOURCE_DIR/"
+  mkdir -p "$SOURCE_DIR/mcp-server"
+  cp "$REPO_DIR/mcp-server/pyproject.toml" "$SOURCE_DIR/mcp-server/"
   [ -f "$SOURCE_DIR/hooks/library-autoinject.sh" ] || printf '#!/bin/bash\nexit 0\n' > "$SOURCE_DIR/hooks/library-autoinject.sh"
   export INSTALL_SH="$SOURCE_DIR/install.sh"
   export CURL_LOG="$TEST_HOME/curl.log"
@@ -750,7 +752,7 @@ for ev in ('PreToolUse', 'PostToolUse'):
   [ "$(cat "$CLAUDE_DIR/hooks/.learnings-branch")" = feat/test ]
   [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = "git+https://github.com/kangraemin/learnings-for-claude@feat/test#subdirectory=mcp-server" ]
   install_with_input 1 --branch main
-  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = claude-library-mcp ]
+  grep -qx 'claude-library-mcp==[0-9][0-9A-Za-z.+-]*' "$CLAUDE_DIR/hooks/.learnings-kb-spec"
   [ ! -e "$CLAUDE_DIR/hooks/.learnings-branch" ]
 }
 
@@ -780,7 +782,7 @@ for ev in ('PreToolUse', 'PostToolUse'):
   grep -q '^feat/test@' "$CLAUDE_DIR/hooks/.learnings-version"
   bash "$SOURCE_DIR/update.sh" --branch main
   [ ! -e "$CLAUDE_DIR/hooks/.learnings-branch" ]
-  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = claude-library-mcp ]
+  grep -qx 'claude-library-mcp==[0-9][0-9A-Za-z.+-]*' "$CLAUDE_DIR/hooks/.learnings-kb-spec"
   jq -e '.custom.keep and .mcpServers.other.command == "other" and .mcpServers["claude-library"].env.EXTRA == "keep" and .mcpServers["claude-library"].args == ["--with","mcp<2","claude-library-mcp@latest"]' "$SETTINGS"
 }
 
@@ -806,7 +808,7 @@ for ev in ('PreToolUse', 'PostToolUse'):
   run bash "$SOURCE_DIR/scripts/update-check.sh" --branch main --check-only
   [ "$status" -eq 0 ]
   [ ! -e "$CLAUDE_DIR/hooks/.learnings-branch" ]
-  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = claude-library-mcp ]
+  grep -qx 'claude-library-mcp==[0-9][0-9A-Za-z.+-]*' "$CLAUDE_DIR/hooks/.learnings-kb-spec"
   grep -q '/commits/main' "$CURL_LOG"
   jq -e '.mcpServers["claude-library"].args == ["--with","mcp<2","claude-library-mcp@latest"]' "$SETTINGS"
 }
@@ -1579,4 +1581,15 @@ DOC
     jq -e '.custom == 42 and .mcpServers.other.command == "keep" and .mcpServers["claude-library"].alwaysLoad == true and .mcpServers["claude-library"].env.CUSTOM == "yes" and .mcpServers["claude-library"].custom == true' "$file"
     jq -e '.mcpServers["claude-library"].command == "old"' "$file.bak"
   done
+}
+
+@test "main kb spec pins packaged version and falls back without pyproject" {
+  source "$SOURCE_DIR/scripts/update-check.sh"
+  update_library_mcp main claude-library-mcp
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = "claude-library-mcp==$(sed -n 's/^version = "\(.*\)"$/\1/p' "$REPO_DIR/mcp-server/pyproject.toml")" ]
+  rm "$SOURCE_DIR/mcp-server/pyproject.toml"
+  update_library_mcp main claude-library-mcp
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = claude-library-mcp ]
+  update_library_mcp feat/x "git+https://example.invalid/x@feat/x#subdirectory=mcp-server"
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = "git+https://example.invalid/x@feat/x#subdirectory=mcp-server" ]
 }
