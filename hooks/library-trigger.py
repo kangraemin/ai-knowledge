@@ -28,17 +28,40 @@ def failed(response):
     return bool(ERROR.search(str(response.get('stderr', ''))))
 
 
+# 셸 문법 실수·통과 로그는 라이브러리 지식과 무관하다.
+SHELL_NOISE = re.compile(r'^(?:\(eval\):\d+:|zsh:|bash: line \d+:|✓)')
+# 내장 예외만 있는 실패는 대개 방금 쓴 코드의 버그다. 모듈·패키지 오류는 유지한다.
+LOCAL_BUG = re.compile(r'^(?:TypeError|KeyError|ValueError|IndexError|AttributeError|NameError|'
+                       r'UnboundLocalError|ZeroDivisionError|FileNotFoundError|'
+                       r'(?:json\.(?:decoder\.)?)?JSONDecodeError)\b')
+
+
 def core_error(text):
     lines = [re.sub(r'\x1b\[[0-9;]*m', '', x).strip() for x in str(text).splitlines() if x.strip()]
-    matches = [x for x in lines if ERROR.search(x) and not x.startswith('Traceback (')]
-    return '\n'.join((matches or lines)[-2:])[:2000]
+    lines = [x for x in lines if not SHELL_NOISE.match(x)]
+    # 오류 표식이 없는 줄(진행 로그 등)로는 검색하지 않는다.
+    matches = [x for x in lines if (ERROR.search(x) or x.startswith('✗')) and not x.startswith('Traceback (')]
+    if not matches or all(LOCAL_BUG.match(x) or x.startswith('raise ') for x in matches):
+        return ''
+    return '\n'.join(matches[-2:])[:2000]
 
 
 def start_args(command):
     try:
-        parts = shlex.split(command, comments=True)
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        parts = list(lexer)
         if parts[:2] == ['bouncer', 'start']:
-            return ' '.join(parts[2:])
+            args = []
+            # 파이프·리다이렉트 뒤는 작업 설명이 아니다.
+            rest = parts[2:]
+            for i, part in enumerate(rest):
+                after = rest[i + 1] if i + 1 < len(rest) else ''
+                if (set(part) <= set('|&;<>()') or re.fullmatch(r'\d*[<>].*', part)
+                        or (part.isdigit() and after[:1] in '<>' and after)):
+                    break
+                args.append(part)
+            return ' '.join(args)
     except (ValueError, TypeError):
         pass
     return ''
@@ -125,8 +148,11 @@ def run(payload):
         return
     context, reason = '', None
     try:
-        args = ['duplicates', query] if kind == 'write' else ['search', '--format', 'trigger', '--', query]
-        env = dict(os.environ, LIBRARY_LOG='0', LIBRARY_SESSION_ID=str(payload.get('session_id', '')))
+        args = (['duplicates', query] if kind == 'write' else
+                ['search', '--format', 'trigger', '--source', 'trigger:' + kind, '--', query])
+        env = dict(os.environ, LIBRARY_SESSION_ID=str(payload.get('session_id', '')))
+        if kind == 'write':
+            env['LIBRARY_LOG'] = '0'
         proc = subprocess.Popen(command() + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True, start_new_session=True, env=env)
         try:
@@ -141,21 +167,23 @@ def run(payload):
             reason = 'search_error'
     except Exception:
         reason = 'unavailable_or_timeout'
-    # CLI 실패도 같은 활동 로그에 남기되 기본 모드에서는 질의를 해시 처리한다.
-    if os.environ.get('LIBRARY_LOG') != '0' and os.environ.get('LIBRARY_USAGE_LOG') != 'off':
+    # 검색이 성공하면 CLI 가 결과 경로·점수·gate 해시와 함께 기록한다.
+    # 그 기록이 없는 경우(중복 검사, CLI 실패·시간 초과)만 여기서 남긴다. 기본 모드에서는 질의를 해시 처리한다.
+    logged_by_cli = kind != 'write' and reason is None
+    if not logged_by_cli and os.environ.get('LIBRARY_LOG') != '0' and os.environ.get('LIBRARY_USAGE_LOG') != 'off':
         try:
             import fcntl
             now = datetime.now(timezone.utc)
             root = Path(os.environ.get('LIBRARY_ROOT', Path.home() / 'claude-library')) / '.activity'
             root.mkdir(parents=True, exist_ok=True)
             record = dict(ts=now.isoformat(), action='inject', source='trigger:' + kind,
-                          session_id=payload.get('session_id', ''), injected=bool(context), results=[],
+                          session_id=payload.get('session_id', ''), injected=bool(context),
+                          results=[{'path': x.split(' · ')[0]} for x in context.splitlines() if x.startswith('library/')],
                           skipped_reason=reason, latency_ms=(time.monotonic()-started)*1000)
             if os.environ.get('LIBRARY_USAGE_LOG') == 'full':
                 record['query'] = query
             else:
                 record.update(query_sha256=hashlib.sha256(query.encode()).hexdigest()[:16], query_len=len(query))
-            # 같은 검색의 판정 기준값(gate 해시)은 CLI 가 남기는 source=trigger 기록에 있다.
             version_file = Path.home() / '.claude/hooks/.learnings-version'
             record['version'] = {'install': version_file.read_text().strip() if version_file.exists() else 'unknown',
                                  'autoinject': os.environ.get('LIBRARY_AUTOINJECT', '0')}

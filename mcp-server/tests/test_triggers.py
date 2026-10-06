@@ -14,13 +14,13 @@ def test_failed(response, expected):
 
 
 def test_core_and_cache():
-    assert trigger.core_error('Traceback (most recent call last):\n  foo()\nValueError: broken') == 'ValueError: broken'
+    assert trigger.core_error('Traceback (most recent call last):\n  foo()\nRuntimeError: broken') == 'RuntimeError: broken'
     assert trigger.claim('s1', 'error', 'broken')
     assert not trigger.claim('s1', 'error', 'broken')
     assert trigger.claim('s2', 'error', 'broken')
 
 
-@pytest.mark.parametrize('command,expected', [('bouncer start bug "fix parser"', 'bug fix parser'), ('echo bouncer start bug', ''), ('bouncer restart bug', ''), ('bouncer start "', '')])
+@pytest.mark.parametrize('command,expected', [('bouncer start bug "fix parser"', 'bug fix parser'), ('echo bouncer start bug', ''), ('bouncer restart bug', ''), ('bouncer start "', ''), ('bouncer start simple goal-x 2>&1 | tail -30', 'simple goal-x'), ('bouncer start simple "a b" && ls', 'simple a b')])
 def test_start(command, expected):
     assert trigger.start_args(command) == expected
 
@@ -44,10 +44,56 @@ def test_inject_and_log(tmp_path, monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)['hookSpecificOutput']['additionalContext'] == 'related context'
     trigger.run(payload)
     assert capsys.readouterr().out == ''
+    # 성공한 검색은 CLI 가 기록하므로 hook 은 중복 기록하지 않는다.
+    assert not list((Path(__import__('os').environ['LIBRARY_ROOT']) / '.activity').glob('*.jsonl'))
+
+
+def test_cli_failure_logged_by_hook(tmp_path, monkeypatch):
+    monkeypatch.setenv('LIBRARY_KB_CMD', '/nonexistent/synthetic-kb')
+    trigger.run(dict(session_id='fail', tool_name='Bash', tool_response={'stderr': 'Error: synthetic'}, tool_input={}))
     logs = list((Path(__import__('os').environ['LIBRARY_ROOT']) / '.activity').glob('*.jsonl'))
     record = json.loads(logs[0].read_text())
-    assert record['source'] == 'trigger:error'
+    assert record['source'] == 'trigger:error' and record['skipped_reason'] == 'unavailable_or_timeout'
     assert 'query' not in record
+
+
+def test_search_passes_trigger_source(tmp_path, monkeypatch, capsys):
+    stub = tmp_path / 'stub.py'
+    stub.write_text('import sys\nprint(" ".join(sys.argv[1:]))')
+    monkeypatch.setenv('LIBRARY_KB_CMD', f'python3 {stub}')
+    trigger.run(dict(session_id='src', tool_name='Bash', tool_response={'stderr': 'Error: source check'}, tool_input={}))
+    assert '--source trigger:error' in capsys.readouterr().out
+
+
+def test_real_cli_logs_trigger_results_with_scores(tmp_path, monkeypatch, capsys):
+    import sys
+    monkeypatch.setenv('LIBRARY_ROOT', str(tmp_path))
+    monkeypatch.setenv('LIBRARY_USAGE_LOG', 'aggregate')
+    monkeypatch.setenv('LIBRARY_KB_CMD', f'{sys.executable} -m kb.cli')
+    folder = tmp_path / 'library'
+    folder.mkdir()
+    (folder / 'zorblat.md').write_text('---\ntype: knowledge\ntitle: zorblat quuxinator crash fix\ndescription: zorblat quuxinator error\n---\nbody\n')
+    for i in range(25):
+        (folder / f'filler{i}.md').write_text(f'---\ntype: knowledge\ntitle: unrelated note {i}\ndescription: plain text {i}\n---\n')
+    trigger.run(dict(session_id='real', tool_name='Bash', tool_response={'stderr': 'ZorblatError: zorblat quuxinator crashed'}, tool_input={}))
+    capsys.readouterr()
+    rows = [json.loads(x) for f in (tmp_path / '.activity').glob('search-*.jsonl') for x in f.read_text().splitlines()]
+    assert len(rows) == 1 and rows[0]['source'] == 'trigger:error' and rows[0]['session_id'] == 'real'
+    assert rows[0]['results'] and 'score' in rows[0]['results'][0]
+
+
+@pytest.mark.parametrize('text,expected', [
+    ('(eval):1: == not found', ''),
+    ('✓ screen 일치율 97.6%\n(eval):1: == not found', ''),
+    ('deploy.sh\napp/x.ait', ''),
+    ("TypeError: 'bool' object is not iterable", ''),
+    ("raise JSONDecodeError(\"Expecting value\", s, err.value) from None\njson.decoder.JSONDecodeError: Expecting value", ''),
+    ("ModuleNotFoundError: No module named 'pkg_resources'", "ModuleNotFoundError: No module named 'pkg_resources'"),
+    ('✗ unlock.png: 불투명', '✗ unlock.png: 불투명'),
+    ('zsh: command not found: foo\nError: real failure', 'Error: real failure'),
+])
+def test_core_error_skips_noise(text, expected):
+    assert trigger.core_error(text) == expected
 
 
 def test_duplicates(tmp_path, monkeypatch):
@@ -125,11 +171,17 @@ def test_dotted_module_path_also_yields_last_segment():
 
 def test_trigger_gate_accepts_strong_or_rare_backed_and_rejects_common_overlap():
     from kb.relevance import select_trigger
-    strong = {"path": "library/a.md", "title": "a", "score": .4, "injection_evidence": {"core_matches": 1}}
-    backed = {"path": "library/b.md", "title": "b", "score": .3, "injection_evidence": {"core_matches": 2}}
-    common = {"path": "library/c.md", "title": "c", "score": .3, "injection_evidence": {"core_matches": 1}}
+    strong = {"path": "library/a.md", "title": "a", "score": .63, "injection_evidence": {"core_matches": 1}}
+    backed = {"path": "library/b.md", "title": "b", "score": .35, "injection_evidence": {"core_matches": 2}}
+    common = {"path": "library/c.md", "title": "c", "score": .42, "injection_evidence": {"core_matches": 1}}
     weak = {"path": "library/d.md", "title": "d", "score": .2, "injection_evidence": {"core_matches": 3}}
     kept, reason = select_trigger([strong, backed, common, weak], 1500)
     assert [r["path"] for r in kept] == ["library/a.md", "library/b.md"] and reason is None
     assert select_trigger([common, weak], 1500) == ([], "weak_evidence")
     assert select_trigger([], 1500) == ([], "no_results")
+
+
+def test_trigger_gate_rejects_strong_score_without_rare_term():
+    from kb.relevance import select_trigger
+    row = {"path": "library/a.md", "title": "a", "score": .9, "injection_evidence": {"core_matches": 0}}
+    assert select_trigger([row], 1500) == ([], "weak_evidence")

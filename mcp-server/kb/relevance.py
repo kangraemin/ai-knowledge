@@ -161,11 +161,12 @@ SHORT_MIN_SCORE = .4
 DEFAULT_DUPLICATE_SCORE = .045
 # 순간 트리거(명령 실패·작업 시작)는 검색이 필요한 시점이라 기저율이 높다.
 # 자동 주입보다 느슨하되, 흔한 단어끼리의 우연한 일치(희소어 1개 이하)는 거른다.
-TRIGGER_MIN_SCORE = .25
+# 2026-10 실사용 판정: 희소어 1개·점수 .35~.42 결과는 전부 무관 문서였다.
+TRIGGER_MIN_SCORE = .3
 TRIGGER_MIN_CORE_MATCHES = 2
 TRIGGER_MAX_RESULTS = 2
 # 희소어가 1개뿐이어도 점수가 충분히 높으면(예: 에러의 모듈명이 제목에 그대로) 인정한다.
-TRIGGER_STRONG_SCORE = .35
+TRIGGER_STRONG_SCORE = .6
 
 
 def minimum(backend):
@@ -203,7 +204,8 @@ def select(rows, backend, budget):
 def select_trigger(rows, budget):
     from .search import format_results
     qualified = [row for row in rows
-                 if row.get("score", 0) >= TRIGGER_STRONG_SCORE
+                 if (row.get("score", 0) >= TRIGGER_STRONG_SCORE
+                     and row.get("injection_evidence", {}).get("core_matches", 0) >= 1)
                  or (row.get("score", 0) >= TRIGGER_MIN_SCORE
                      and row.get("injection_evidence", {}).get("core_matches", 0) >= TRIGGER_MIN_CORE_MATCHES)]
     if not qualified:

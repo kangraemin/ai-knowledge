@@ -101,6 +101,7 @@ def parser():
     s = sub.add_parser("search")
     s.add_argument("query")
     s.add_argument("--format", choices=["text", "inject", "trigger", "json"], default="text")
+    s.add_argument("--source", help="활동 로그 source (예: trigger:error)")
     s.add_argument("--budget", type=int, default=1500)
     s.add_argument("--scope")
     s.add_argument("--include-deprecated", action="store_true")
@@ -244,7 +245,7 @@ def main(argv=None):
                     except Exception:
                         pass
             search_event(args.query, logged_rows, backend, (time.monotonic() - started) * 1000,
-                         source={"inject": "autoinject", "trigger": "trigger"}.get(args.format, "cli"),
+                         source=args.source or {"inject": "autoinject", "trigger": "trigger"}.get(args.format, "cli"),
                          injected=bool(result) if args.format in ("inject", "trigger") else False,
                          skipped_reason=reason,
                          action="inject" if args.format in ("inject", "trigger") else "search")
