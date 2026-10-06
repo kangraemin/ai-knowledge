@@ -29,13 +29,66 @@ def weights(entry, terms):
     return [6 * evidence.get(t, 0) for t in terms]
 
 
+_ANALYZED_KEYS = ("title", "description", "tags", "path", "body")
+
+
+def _analyze(doc):
+    return field_terms(doc), _tokens(" ".join(str(doc.get(k) or "") for k in
+                                            ("title", "description", "path")))
+
+
+def _analyze_cached(docs):
+    """문서 토큰화는 검색 시간의 대부분이다. 내용 해시로 디스크에 캐시한다.
+
+    캐시는 토크나이저 소스가 바뀌면 통째로 버린다. 실패하면 캐시 없이 계산한다.
+    """
+    import hashlib
+    import json
+    import os
+    from pathlib import Path
+    folder = Path(os.environ.get("LIBRARY_CACHE_DIR") or
+                  Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache") / "claude-library-kb")
+    here = Path(__file__).resolve().parent
+    try:
+        code = hashlib.sha1(b"".join((here / f).read_bytes() for f in ("search.py", "relevance.py"))).hexdigest()[:12]
+    except OSError:
+        return [_analyze(d) for d in docs]
+    file = folder / f"corpus-{code}.json"
+    try:
+        cache = json.loads(file.read_text())
+    except (OSError, ValueError):
+        cache = {}
+    fresh, result = {}, []
+    for doc in docs:
+        key = hashlib.sha1(json.dumps([str(doc.get(k) or "") for k in _ANALYZED_KEYS],
+                                      ensure_ascii=False).encode()).hexdigest()
+        hit = cache.get(key)
+        if not (isinstance(hit, list) and len(hit) == 2 and isinstance(hit[0], dict)):
+            fields, meta = _analyze(doc)
+            hit = [fields, sorted(meta)]
+        fresh[key] = hit
+        result.append((hit[0], frozenset(hit[1])))
+    if fresh.keys() != cache.keys():
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            for old in folder.glob("corpus-*.json"):
+                if old != file:
+                    old.unlink(missing_ok=True)
+            tmp = file.with_suffix(f".{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(fresh, ensure_ascii=False))
+            os.replace(tmp, file)
+        except OSError:
+            pass
+    return result
+
+
 class Corpus:
     """권한과 scope 필터를 적용한 전체 문서로만 IDF를 계산한다."""
 
     def __init__(self, docs):
-        self.fields = [field_terms(d) for d in docs]
-        self.metadata = [_tokens(" ".join(str(d.get(k) or "") for k in
-                                         ("title", "description", "path"))) for d in docs]
+        analyzed = _analyze_cached(docs)
+        self.fields = [fields for fields, _ in analyzed]
+        self.metadata = [meta for _, meta in analyzed]
         self.df = Counter(t for fields in self.fields for t in fields)
         self.n = len(docs)
         self.postings = defaultdict(dict)

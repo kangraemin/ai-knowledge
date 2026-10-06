@@ -276,10 +276,11 @@ wheels = [
 
 [[package]]
 name = "claude-library-mcp"
-version = "0.5.1"
+version = "0.5.2"
 source = { editable = "." }
 dependencies = [
     { name = "mcp", extra = ["cli"] },
+    { name = "pyyaml" },
 ]
 
 [package.optional-dependencies]
@@ -300,6 +301,7 @@ requires-dist = [
     { name = "mcp", extras = ["cli"], specifier = ">=1.0.0,<2" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1,<3" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.1,<4" },
+    { name = "pyyaml", specifier = ">=6,<7" },
     { name = "pyyaml", marker = "extra == 'postgres'", specifier = ">=6,<7" },
 ]
 provides-extras = ["postgres", "embed", "openai"]

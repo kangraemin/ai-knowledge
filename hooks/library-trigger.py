@@ -29,10 +29,10 @@ def failed(response):
 
 
 # 셸 문법 실수·통과 로그는 라이브러리 지식과 무관하다.
-SHELL_NOISE = re.compile(r'^(?:\(eval\):\d+:|zsh:|bash: line \d+:|✓)')
+SHELL_NOISE = re.compile(r'^(?:\(eval\):\d+:|zsh:|bash: line \d+:|✓|The above exception was|During handling of the above)')
 # 내장 예외만 있는 실패는 대개 방금 쓴 코드의 버그다. 모듈·패키지 오류는 유지한다.
 LOCAL_BUG = re.compile(r'^(?:TypeError|KeyError|ValueError|IndexError|AttributeError|NameError|'
-                       r'UnboundLocalError|ZeroDivisionError|FileNotFoundError|'
+                       r'UnboundLocalError|ZeroDivisionError|FileNotFoundError|SyntaxError|IndentationError|'
                        r'(?:json\.(?:decoder\.)?)?JSONDecodeError)\b')
 
 

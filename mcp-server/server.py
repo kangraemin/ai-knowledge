@@ -7,22 +7,41 @@ import os
 import re
 import time
 from pathlib import Path
-from mcp.server.fastmcp import FastMCP
+
+INSTRUCTIONS = (
+    "ALWAYS call library_search() before answering technical questions, "
+    "suggesting approaches, or starting implementation. "
+    "Search for relevant keywords from the user's question. "
+    "This library contains past experiments, gotchas, and proven solutions — "
+    "ignoring it risks repeating known mistakes. "
+    "If results found: prefix response with '📚 library 참조: [topic]' and follow stored guidance. "
+    "If no results: proceed normally without mentioning the search."
+)
 
 LIBRARY_ROOT = Path(os.environ.get("LIBRARY_ROOT", Path.home() / "claude-library"))
 
-mcp = FastMCP(
-    "claude-library",
-    instructions=(
-        "ALWAYS call library_search() before answering technical questions, "
-        "suggesting approaches, or starting implementation. "
-        "Search for relevant keywords from the user's question. "
-        "This library contains past experiments, gotchas, and proven solutions — "
-        "ignoring it risks repeating known mistakes. "
-        "If results found: prefix response with '📚 library 참조: [topic]' and follow stored guidance. "
-        "If no results: proceed normally without mentioning the search."
-    )
-)
+
+class _ToolRegistry:
+    """CLI·hook 은 검색 함수만 쓴다. mcp 패키지 import(약 2초)는 서버 실행 때만 한다."""
+
+    def __init__(self):
+        self.tools = []
+
+    def tool(self):
+        def register(fn):
+            self.tools.append(fn)
+            return fn
+        return register
+
+    def build(self):
+        from mcp.server.fastmcp import FastMCP
+        app = FastMCP("claude-library", instructions=INSTRUCTIONS)
+        for fn in self.tools:
+            app.add_tool(fn)
+        return app
+
+
+mcp = _ToolRegistry()
 
 # --- In-memory index (lazy built) ---
 
@@ -415,7 +434,7 @@ def library_promote(path: str) -> str:
 
 
 def main():
-    mcp.run()
+    mcp.build().run()
 
 
 if __name__ == "__main__":

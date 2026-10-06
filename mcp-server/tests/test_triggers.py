@@ -91,6 +91,8 @@ def test_real_cli_logs_trigger_results_with_scores(tmp_path, monkeypatch, capsys
     ("ModuleNotFoundError: No module named 'pkg_resources'", "ModuleNotFoundError: No module named 'pkg_resources'"),
     ('✗ unlock.png: 불투명', '✗ unlock.png: 불투명'),
     ('zsh: command not found: foo\nError: real failure', 'Error: real failure'),
+    ('SyntaxError: unterminated string literal (detected at line 1)', ''),
+    ('The above exception was the direct cause of the following exception:\nRuntimeError: boom', 'RuntimeError: boom'),
 ])
 def test_core_error_skips_noise(text, expected):
     assert trigger.core_error(text) == expected
@@ -185,3 +187,49 @@ def test_trigger_gate_rejects_strong_score_without_rare_term():
     from kb.relevance import select_trigger
     row = {"path": "library/a.md", "title": "a", "score": .9, "injection_evidence": {"core_matches": 0}}
     assert select_trigger([row], 1500) == ([], "weak_evidence")
+
+
+def test_core_dependencies_cover_files_backend_imports():
+    # 파일 백엔드(중복 검사 포함)는 postgres extra 없이 동작해야 한다.
+    import tomllib
+    meta = tomllib.loads((Path(__file__).resolve().parents[1] / 'pyproject.toml').read_text())
+    core = ' '.join(meta['project']['dependencies']).lower()
+    assert 'pyyaml' in core
+
+
+def test_server_import_does_not_load_mcp():
+    import subprocess
+    import sys
+    code = 'import sys, server; assert "mcp" not in sys.modules, "mcp loaded"; print(len(server.mcp.tools))'
+    out = subprocess.run([sys.executable, '-c', code], cwd=Path(__file__).resolve().parents[1],
+                         capture_output=True, text=True)
+    assert out.returncode == 0, out.stderr
+    assert int(out.stdout) >= 9
+
+
+def test_corpus_cache_matches_uncached_scores(tmp_path, monkeypatch):
+    from kb import relevance
+    monkeypatch.setenv('LIBRARY_CACHE_DIR', str(tmp_path / 'cache'))
+    docs = [{'path': f'library/d{i}.md', 'title': f'alpha beta {i}', 'description': 'gamma delta',
+             'tags': ['x'], 'body': f'body text {i} epsilon'} for i in range(30)]
+    first = relevance.Corpus(docs).scores('alpha gamma epsilon')
+    assert list((tmp_path / 'cache').glob('corpus-*.json'))
+    second = relevance.Corpus(docs).scores('alpha gamma epsilon')
+    monkeypatch.setattr(relevance, '_analyze_cached', lambda d: [relevance._analyze(x) for x in d])
+    third = relevance.Corpus(docs).scores('alpha gamma epsilon')
+    assert first == second == third
+    docs[0]['title'] = 'changed zeta'
+    monkeypatch.undo()
+    monkeypatch.setenv('LIBRARY_CACHE_DIR', str(tmp_path / 'cache'))
+    assert relevance.Corpus(docs).scores('zeta')[0] > 0
+
+
+def test_duplicates_skip_broken_frontmatter(tmp_path, monkeypatch):
+    from kb.duplicates import related
+    monkeypatch.setenv('LIBRARY_ROOT', str(tmp_path))
+    folder = tmp_path / 'library'
+    folder.mkdir()
+    (folder / 'broken.md').write_text('---\ntype: x\ndescription: "quoted" then more\n---\n')
+    for name in ('old', 'new'):
+        (folder / f'{name}.md').write_text('---\ntype: knowledge\ntitle: Synthetic parser boundary regression\ndescription: structured input validation\n---\n')
+    assert related(folder / 'new.md') == '중복/관련 가능: library/old.md'

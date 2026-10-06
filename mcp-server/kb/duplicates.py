@@ -18,7 +18,8 @@ def related(value):
             meta, body = parse(path.read_text())
             title = meta.get('title') or next((line.lstrip('# ').strip() for line in body.splitlines() if line.startswith('# ')), '')
             documents.append(dict(meta, title=title, path=str(path.relative_to(base))))
-        except (ValueError, OSError):
+        except Exception:
+            # 다른 문서 하나의 깨진 프론트매터 때문에 중복 검사 전체가 실패하지 않게 한다.
             continue
     current = next((d for d in documents if d['path'] == str(target.relative_to(base))), None)
     if current is None:
