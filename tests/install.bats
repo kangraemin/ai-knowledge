@@ -12,6 +12,8 @@ setup() {
 
   unset LEARNINGS_PROFILE LIBRARY_USAGE_LOG LEARNINGS_BRANCH LEARNINGS_AUTO_UPDATE LIBRARY_KB_CMD LIBRARY_AUTOINJECT KB_SLEEP KB_FAIL
   export ORIG_TEST_PATH="$PATH"
+  # 테스트가 실제 uvx 로 PyPI 를 받지 않게 한다. 미리 받기 동작은 전용 테스트에서 stub 으로 검증한다.
+  export LEARNINGS_KB_WARM=0
   export REPO_DIR="$(dirname "$INSTALL_SH")"
   # 네트워크와 실제 홈에 의존하지 않는 소스 복제본.
   export SOURCE_DIR="$TEST_HOME/source"
@@ -1592,4 +1594,41 @@ DOC
   [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = claude-library-mcp ]
   update_library_mcp feat/x "git+https://example.invalid/x@feat/x#subdirectory=mcp-server"
   [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = "git+https://example.invalid/x@feat/x#subdirectory=mcp-server" ]
+}
+
+@test "pinned kb spec is refreshed in uv cache and keeps previous spec when install fails" {
+  cat > "$TEST_HOME/bin/uvx" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >> "$TEST_HOME/uvx.log"
+[ "${UVX_FAIL:-0}" = 1 ] && exit 1
+exit 0
+STUB
+  chmod +x "$TEST_HOME/bin/uvx"
+  export LEARNINGS_KB_WARM=1
+  local version
+  version=$(sed -n 's/^version = "\(.*\)"$/\1/p' "$REPO_DIR/mcp-server/pyproject.toml")
+  source "$SOURCE_DIR/scripts/update-check.sh"
+  update_library_mcp main claude-library-mcp
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = "claude-library-mcp==$version" ]
+  grep -q -- "--refresh-package claude-library-mcp .*--from claude-library-mcp==$version claude-library-kb --help" "$TEST_HOME/uvx.log"
+  printf 'claude-library-mcp==0.0.1\n' > "$CLAUDE_DIR/hooks/.learnings-kb-spec"
+  UVX_FAIL=1 update_library_mcp main claude-library-mcp
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = "claude-library-mcp==0.0.1" ]
+  rm "$CLAUDE_DIR/hooks/.learnings-kb-spec"
+  UVX_FAIL=1 update_library_mcp main claude-library-mcp
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = claude-library-mcp ]
+}
+
+@test "decision inject adds global decisions outside git and skips ones already in CLAUDE.md" {
+  local lib="$TEST_HOME/lib"
+  mkdir -p "$lib/decisions/_global/process" "$TEST_HOME/plain"
+  printf -- '---\ntype: Decision\nstatus: stable\n---\n\n# 개인정보는 로컬 파일에서 읽는다\n\n개인정보는 ~/x.md 를 읽는다.\n' > "$lib/decisions/_global/process/personal.md"
+  printf -- '---\ntype: Decision\nstatus: stable\n---\n\n# 이미 실린 규칙\n\n본문\n' > "$lib/decisions/_global/process/loaded.md"
+  printf '규칙 <!-- why: decisions/_global/process/loaded.md -->\n' > "$CLAUDE_DIR/CLAUDE.md"
+  run bash -c "printf '{\"cwd\":\"$TEST_HOME/plain\"}' | LIBRARY_ROOT='$lib' bash '$SOURCE_DIR/hooks/decision-inject.sh'"
+  [ "$status" -eq 0 ]
+  echo "$output" | jq -r .hookSpecificOutput.additionalContext > "$TEST_HOME/ctx"
+  grep -q '개인정보는 로컬 파일에서 읽는다' "$TEST_HOME/ctx"
+  grep -q '개인정보는 ~/x.md 를 읽는다.' "$TEST_HOME/ctx"
+  ! grep -q '이미 실린 규칙' "$TEST_HOME/ctx"
 }

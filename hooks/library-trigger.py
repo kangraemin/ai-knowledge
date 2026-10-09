@@ -36,6 +36,15 @@ LOCAL_BUG = re.compile(r'^(?:TypeError|KeyError|ValueError|IndexError|AttributeE
                        r'(?:json\.(?:decoder\.)?)?JSONDecodeError)\b')
 
 
+def result_rows(context):
+    """주입한 문서 경로(와 중복 검사 점수)를 로그용으로 뽑는다. 검색·중복 검사 출력 형식을 모두 받는다."""
+    rows = []
+    for match in re.finditer(r'(library/\S+?\.md)(?: \((\d+(?:\.\d+)?)\))?', context):
+        if match[1] not in [row['path'] for row in rows]:
+            rows.append({'path': match[1], **({'score': float(match[2])} if match[2] else {})})
+    return rows
+
+
 def core_error(text):
     lines = [re.sub(r'\x1b\[[0-9;]*m', '', x).strip() for x in str(text).splitlines() if x.strip()]
     lines = [x for x in lines if not SHELL_NOISE.match(x)]
@@ -178,14 +187,16 @@ def run(payload):
             root.mkdir(parents=True, exist_ok=True)
             record = dict(ts=now.isoformat(), action='inject', source='trigger:' + kind,
                           session_id=payload.get('session_id', ''), injected=bool(context),
-                          results=[{'path': x.split(' · ')[0]} for x in context.splitlines() if x.startswith('library/')],
+                          results=result_rows(context),
                           skipped_reason=reason, latency_ms=(time.monotonic()-started)*1000)
             if os.environ.get('LIBRARY_USAGE_LOG') == 'full':
                 record['query'] = query
             else:
                 record.update(query_sha256=hashlib.sha256(query.encode()).hexdigest()[:16], query_len=len(query))
             version_file = Path.home() / '.claude/hooks/.learnings-version'
+            spec_file = Path.home() / '.claude/hooks/.learnings-kb-spec'
             record['version'] = {'install': version_file.read_text().strip() if version_file.exists() else 'unknown',
+                                 'kb_spec': spec_file.read_text().strip() if spec_file.exists() else 'unknown',
                                  'autoinject': os.environ.get('LIBRARY_AUTOINJECT', '0')}
             with (root / ('search-' + now.strftime('%Y-%m') + '.jsonl')).open('a') as stream:
                 fcntl.flock(stream, fcntl.LOCK_EX)

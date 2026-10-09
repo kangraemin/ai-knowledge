@@ -105,7 +105,7 @@ def test_duplicates(tmp_path, monkeypatch):
     folder.mkdir()
     for name in ('old', 'new'):
         (folder / f'{name}.md').write_text('---\ntype: knowledge\ntitle: Synthetic parser boundary regression\ndescription: structured input validation\n---\n')
-    assert related(folder / 'new.md') == '중복/관련 가능: library/old.md'
+    assert related(folder / 'new.md') == '중복/관련 가능: library/old.md (1.00)'
 
 
 def test_new_document_edit_scope(tmp_path, monkeypatch):
@@ -162,7 +162,7 @@ def test_write_real_cli(tmp_path, monkeypatch, capsys):
         (folder / f'{name}.md').write_text('---\ntype: knowledge\ntitle: Synthetic symmetric duplicate detection\ndescription: metadata similarity\n---\n')
     trigger.run(dict(session_id='write', tool_name='Write', tool_input={'file_path': str(folder / 'new.md')}, tool_response={'type': 'create'}))
     output = json.loads(capsys.readouterr().out)
-    assert output['hookSpecificOutput']['additionalContext'] == '중복/관련 가능: library/old.md'
+    assert output['hookSpecificOutput']['additionalContext'] == '중복/관련 가능: library/old.md (1.00)'
 
 
 def test_dotted_module_path_also_yields_last_segment():
@@ -232,4 +232,57 @@ def test_duplicates_skip_broken_frontmatter(tmp_path, monkeypatch):
     (folder / 'broken.md').write_text('---\ntype: x\ndescription: "quoted" then more\n---\n')
     for name in ('old', 'new'):
         (folder / f'{name}.md').write_text('---\ntype: knowledge\ntitle: Synthetic parser boundary regression\ndescription: structured input validation\n---\n')
-    assert related(folder / 'new.md') == '중복/관련 가능: library/old.md'
+    assert related(folder / 'new.md') == '중복/관련 가능: library/old.md (1.00)'
+
+
+def test_duplicates_skip_unrelated_and_cap_results(tmp_path, monkeypatch):
+    from kb.duplicates import related
+    monkeypatch.setenv('LIBRARY_ROOT', str(tmp_path))
+    folder = tmp_path / 'library'
+    folder.mkdir()
+    for i in range(5):
+        (folder / f'same{i}.md').write_text('---\ntype: k\ntitle: Synthetic parser boundary regression\n---\n')
+    for i in range(30):
+        (folder / f'other{i}.md').write_text(f'---\ntype: k\ntitle: unrelated topic{i} cache warmup\n---\n')
+    (folder / 'new.md').write_text('---\ntype: k\ntitle: Synthetic parser boundary regression\n---\n')
+    lines = related(folder / 'new.md').splitlines()
+    assert len(lines) == 3 and all('library/same' in x for x in lines)
+
+
+def test_korean_substring_matches_equal_naive_scan():
+    from kb import relevance
+    docs = [{'title': t, 'path': f'library/{i}.md'} for i, t in
+            enumerate(['개인정보 로컬 파일', '정보보호 규칙', '공모전 개인정보는 비공개', 'ascii only', '보호막'])]
+    corpus = relevance.Corpus(docs)
+    for term in ['정보', '개인정보', '보호', '공모', '없는말']:
+        naive = {}
+        for token, postings in corpus.postings.items():
+            if term in token:
+                for i, w in postings.items():
+                    naive[i] = max(naive.get(i, 0), w)
+        assert corpus.matches(term) == naive
+
+
+def test_result_rows_parses_search_and_duplicate_output():
+    context = ('library/a/x.md · 제목 · 설명\n'
+               '중복/관련 가능: library/b/y.md (0.42)\n중복/관련 가능: library/b/y.md (0.42)')
+    assert trigger.result_rows(context) == [{'path': 'library/a/x.md'}, {'path': 'library/b/y.md', 'score': 0.42}]
+
+
+def test_library_search_includes_global_and_current_repo_decisions(tmp_path, monkeypatch):
+    import server
+    root = tmp_path / 'root'
+    (root / 'library').mkdir(parents=True)
+    for repo, title in [('_global', '개인정보는 로컬 파일에서만 읽는다'), ('mine', '배포는 태그로만 한다'),
+                        ('other', '개인정보 연락처 다른 레포 규칙')]:
+        folder = root / 'decisions' / repo / 'process'
+        folder.mkdir(parents=True)
+        (folder / 'd.md').write_text(f'---\ntype: Decision\nstatus: stable\n---\n\n# {title}\n\n{title} 본문 요약\n')
+    monkeypatch.setattr(server, 'LIBRARY_ROOT', root)
+    monkeypatch.setattr(server, '_index_cache', None)
+    monkeypatch.setattr(server, '_current_repo', lambda: 'mine')
+    result = server.library_search('개인정보 로컬 파일 위치')
+    assert 'decisions/_global/process/d.md' in result and '개인정보는 로컬 파일에서만 읽는다 본문 요약' in result
+    assert 'decisions/other/' not in result
+    assert 'decisions/mine/process/d.md' in server.library_search('배포 태그')
+    assert '결정사항 없음' in server.library_search('zzzz')

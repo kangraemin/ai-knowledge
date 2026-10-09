@@ -20,22 +20,33 @@ def validate_path(path):
     return p.as_posix()
 
 
+_LOADER = None
+
+
+def _loader():
+    # 날짜도 JSON으로 손실 없이 옮기도록 문자열로 읽는다. libyaml 이 있으면 C 파서로 수 배 빠르다.
+    global _LOADER
+    if _LOADER is None:
+        import yaml
+
+        class Loader(getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
+            pass
+
+        Loader.yaml_implicit_resolvers = {
+            k: [(tag, rx) for tag, rx in v if tag != "tag:yaml.org,2002:timestamp"]
+            for k, v in yaml.SafeLoader.yaml_implicit_resolvers.items()
+        }
+        _LOADER = Loader
+    return _LOADER
+
+
 def parse(markdown):
     import yaml
 
     match = re.match(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|$)", markdown, re.S)
     if not match:
         return {}, markdown
-
-    # 날짜도 JSON으로 손실 없이 옮기도록 문자열로 읽는다.
-    class Loader(yaml.SafeLoader):
-        pass
-
-    Loader.yaml_implicit_resolvers = {
-        k: [(tag, rx) for tag, rx in v if tag != "tag:yaml.org,2002:timestamp"]
-        for k, v in yaml.SafeLoader.yaml_implicit_resolvers.items()
-    }
-    meta = yaml.load(match[1], Loader=Loader) or {}
+    meta = yaml.load(match[1], Loader=_loader()) or {}
     if not isinstance(meta, dict):
         raise ValueError("프론트매터는 mapping이어야 합니다")
     # jsonb가 표현하지 못하는 YAML 값은 조용히 변환하지 않는다.

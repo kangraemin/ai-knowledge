@@ -14,6 +14,8 @@ INSTRUCTIONS = (
     "Search for relevant keywords from the user's question. "
     "This library contains past experiments, gotchas, and proven solutions — "
     "ignoring it risks repeating known mistakes. "
+    "library_search also returns matching decisions (rules already agreed with the user) — follow them. "
+    "Before telling the user something is not in the library, also run decision_search() with the same keywords. "
     "If results found: prefix response with '📚 library 참조: [topic]' and follow stored guidance. "
     "If no results: proceed normally without mentioning the search."
 )
@@ -175,11 +177,55 @@ def library_search(query: str) -> str:
     from kb.activity import search_event
     search_event(query, matches, "files", (time.monotonic() - start) * 1000, library_root=LIBRARY_ROOT)
 
-    if not matches:
-        return f"'{query}' 관련 라이브러리 항목 없음."
+    # 모델은 지식만 검색하고 결정사항(decision_search)은 잘 부르지 않는다. 함께 보여준다.
+    decisions = _related_decisions(query)
+    if not matches and not decisions:
+        return f"'{query}' 관련 라이브러리 항목·결정사항 없음."
 
     from kb.search import format_results
-    return format_results(matches, token_budget=10000)
+    out = format_results(matches, token_budget=10000) if matches else f"'{query}' 관련 라이브러리 항목 없음."
+    if decisions:
+        out += "\n\n## 관련 결정사항 (이미 정한 규칙 — 따른다)\n" + "\n".join(
+            f"- **{_decision_title(e)}** `{e['path']}`" + (f"\n  {d}" if (d := _decision_outcome(e) or _decision_lead(e)) else "")
+            for e in decisions)
+    return out
+
+
+def _decision_lead(entry) -> str:
+    """Decision Outcome 절이 없는 결정은 제목 다음 첫 문단 줄을 요약으로 쓴다."""
+    seen_title = False
+    for line in entry["body"].splitlines():
+        if line.startswith("# "):
+            seen_title = True
+        elif seen_title and line.strip() and not line.startswith("#"):
+            return line.strip()[:400]
+    return ""
+
+
+def _current_repo() -> str:
+    """세션 작업 디렉토리의 레포명 (decision-inject.sh 와 같은 규칙). git 밖이면 빈 문자열."""
+    import subprocess
+    for args in (["remote", "get-url", "origin"], ["rev-parse", "--show-toplevel"]):
+        try:
+            out = subprocess.run(["git", *args], capture_output=True, text=True, timeout=2).stdout.strip()
+        except Exception:
+            out = ""
+        if out:
+            return re.sub(r"\.git$", "", out.rstrip("/").rsplit("/", 1)[-1])
+    return ""
+
+
+def _related_decisions(query: str, k=2) -> list[dict]:
+    """공통(_global)과 현재 레포 결정만 본다. 다른 레포 결정은 단어만 겹쳐도 엉뚱하게 붙는다."""
+    from kb.relevance import Corpus, DEFAULT_MIN_SCORE
+    scope = {"_global", _current_repo()} - {""}
+    entries = [e for e in _decision_entries("")
+               if e["status"] != "deprecated" and e["category"] in DECISION_CATEGORIES and e["repo"] in scope]
+    if not entries:
+        return []
+    docs = [{"title": _decision_title(e), "body": e["body"], "path": e["path"]} for e in entries]
+    scored = sorted(zip(Corpus(docs).scores(query), range(len(entries))), reverse=True)
+    return [entries[i] for score, i in scored[:k] if score >= DEFAULT_MIN_SCORE["files"]]
 
 
 @mcp.tool()

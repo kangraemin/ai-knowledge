@@ -1,5 +1,6 @@
 """코퍼스 IDF 커버리지와 별도의 대칭 문서 유사도. 점수는 확률이 아니다."""
 
+import bisect
 import math
 import re
 from collections import Counter, defaultdict
@@ -98,14 +99,31 @@ class Corpus:
                 self.postings[term][i] = weight
         self._matches = {}
 
+    def _containing(self, term):
+        """term 을 부분 문자열로 포함하는 어휘. 어휘 전체를 한 문자열로 이어 C 수준 find 로 찾는다."""
+        if not hasattr(self, '_blob'):
+            # 한글 부분 일치만 쓰므로 비ASCII 어휘만 이어 붙인다. 구분자 \0 은 토큰에 없다.
+            self._vocab = [t for t in self.postings if not t.isascii()]
+            self._blob = '\0'.join(self._vocab)
+            self._starts, pos = [], 0
+            for token in self._vocab:
+                self._starts.append(pos)
+                pos += len(token) + 1
+        found, at = set(), self._blob.find(term)
+        while at >= 0:
+            index = bisect.bisect_right(self._starts, at) - 1
+            found.add(self._vocab[index])
+            # 같은 토큰 안의 다음 위치는 볼 필요 없다. 다음 토큰부터 찾는다.
+            at = self._blob.find(term, self._starts[index] + len(self._vocab[index]) + 1)
+        return found
+
     def matches(self, term):
         if term not in self._matches:
             found = dict(self.postings.get(term, {}))
             if not term.isascii():
-                for token, postings in self.postings.items():
-                    if term in token:
-                        for i, weight in postings.items():
-                            found[i] = max(found.get(i, 0), weight)
+                for token in self._containing(term):
+                    for i, weight in self.postings[token].items():
+                        found[i] = max(found.get(i, 0), weight)
             self._matches[term] = found
         return self._matches[term]
 
@@ -212,6 +230,9 @@ MIN_CORE_MATCHES = 4
 SHORT_QUERY_TERMS = 16
 SHORT_MIN_SCORE = .4
 DEFAULT_DUPLICATE_SCORE = .045
+# 새 문서 작성 직후 알림은 같은 주제 문서만 보여준다. 실측상 .1 미만은 단어 한두 개 우연 일치였다.
+WRITE_DUPLICATE_SCORE = .1
+WRITE_DUPLICATE_MAX = 3
 # 순간 트리거(명령 실패·작업 시작)는 검색이 필요한 시점이라 기저율이 높다.
 # 자동 주입보다 느슨하되, 흔한 단어끼리의 우연한 일치(희소어 1개 이하)는 거른다.
 # 2026-10 실사용 판정: 희소어 1개·점수 .35~.42 결과는 전부 무관 문서였다.

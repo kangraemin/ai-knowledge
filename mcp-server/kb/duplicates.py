@@ -2,7 +2,8 @@
 from pathlib import Path
 from .activity import root
 from .markdown import parse
-from .relevance import Corpus, DEFAULT_DUPLICATE_SCORE, duplicate_similarity
+from .relevance import (Corpus, WRITE_DUPLICATE_MAX, WRITE_DUPLICATE_SCORE, _tokens,
+                        duplicate_similarity)
 
 
 def related(value):
@@ -25,5 +26,11 @@ def related(value):
     if current is None:
         return ''
     corpus = Corpus(documents)
-    matches = [(duplicate_similarity(current, doc, corpus), doc['path']) for doc in documents if doc is not current]
-    return '\n'.join('중복/관련 가능: ' + path for score, path in sorted(matches, reverse=True)[:5] if score >= DEFAULT_DUPLICATE_SCORE)
+    # 제목·설명 단어를 하나도 공유하지 않는 문서는 유사도가 0이다. 전체 IDF 계산을 피해 hook 시간 안에 끝낸다.
+    words = lambda doc: _tokens(' '.join(str(doc.get(k) or '') for k in ('title', 'description')))
+    mine = words(current)
+    matches = [(duplicate_similarity(current, doc, corpus), doc['path']) for doc in documents
+               if doc is not current and mine & words(doc)]
+    return '\n'.join(f'중복/관련 가능: {path} ({score:.2f})'
+                     for score, path in sorted(matches, reverse=True)[:WRITE_DUPLICATE_MAX]
+                     if score >= WRITE_DUPLICATE_SCORE)

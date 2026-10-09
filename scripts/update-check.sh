@@ -61,7 +61,19 @@ update_library_mcp() {
     [ -n "$version" ] && spec="claude-library-mcp==$version"
   fi
   mkdir -p "$HOME/.claude/hooks"
-  printf '%s\n' "$spec" > "$HOME/.claude/hooks/.learnings-kb-spec"
+  local spec_file="$HOME/.claude/hooks/.learnings-kb-spec"
+  # uv 는 PyPI 목록을 캐시해서 방금 올린 버전을 못 찾는다. 그대로 두면 hook 이 매번 즉시 실패한다.
+  # 목록을 새로 받아 미리 설치해 두고, 실패하면(아직 미배포·오프라인) 이전 spec 을 유지한다.
+  if [ "${spec#claude-library-mcp==}" != "$spec" ] && [ "${LEARNINGS_KB_WARM:-1}" != 0 ] && command -v uvx >/dev/null 2>&1; then
+    if ! uvx --refresh-package claude-library-mcp --with 'mcp<2' --from "$spec" claude-library-kb --help >/dev/null 2>&1; then
+      if [ -s "$spec_file" ]; then
+        echo "경고: $spec 설치 실패 — hook 은 이전 버전($(cat "$spec_file"))을 계속 쓴다" >&2
+        return 0
+      fi
+      spec=claude-library-mcp
+    fi
+  fi
+  printf '%s\n' "$spec" > "$spec_file"
 }
 
 # source 할 때 체크/다운로드 등 실행 부작용 없이 함수만 제공한다.
