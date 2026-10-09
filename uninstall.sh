@@ -107,6 +107,6 @@ fi
 remove_library_rules "$GLOBAL_CLAUDE_MD"
 rm -f "$HOME/.claude/hooks/.learnings-version"
 
-rm -f "$HOOK_DIR/.learnings-kb-spec" "$HOOK_DIR/.learnings-branch" "$HOOK_DIR/.learnings-version-checked"
+rm -f "$HOOK_DIR/.learnings-kb-spec" "$HOOK_DIR/.learnings-kb-pending" "$HOOK_DIR/.learnings-kb-pending.tried" "$HOOK_DIR/.learnings-branch" "$HOOK_DIR/.learnings-version-checked"
 
 rm -f "$HOOK_DIR/.learnings-profile" "$HOOK_DIR/.learnings-usage-log"

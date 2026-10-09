@@ -62,17 +62,22 @@ update_library_mcp() {
   fi
   mkdir -p "$HOME/.claude/hooks"
   local spec_file="$HOME/.claude/hooks/.learnings-kb-spec"
+  local pending_file="$HOME/.claude/hooks/.learnings-kb-pending"
   # uv 는 PyPI 목록을 캐시해서 방금 올린 버전을 못 찾는다. 그대로 두면 hook 이 매번 즉시 실패한다.
-  # 목록을 새로 받아 미리 설치해 두고, 실패하면(아직 미배포·오프라인) 이전 spec 을 유지한다.
+  # 목록을 새로 받아 미리 설치해 두고, 실패하면(배포 직후 CDN 지연·오프라인) 이전 spec 을 유지한 채
+  # 새 버전을 pending 으로 남긴다. 트리거 hook 이 10분 간격으로 백그라운드 설치해 성공하면 교체한다.
   if [ "${spec#claude-library-mcp==}" != "$spec" ] && [ "${LEARNINGS_KB_WARM:-1}" != 0 ] && command -v uvx >/dev/null 2>&1; then
     if ! uvx --refresh-package claude-library-mcp --with 'mcp<2' --from "$spec" claude-library-kb --help >/dev/null 2>&1; then
+      printf '%s\n' "$spec" > "$pending_file"
+      rm -f "$pending_file.tried"
       if [ -s "$spec_file" ]; then
-        echo "경고: $spec 설치 실패 — hook 은 이전 버전($(cat "$spec_file"))을 계속 쓴다" >&2
+        echo "알림: $spec 아직 설치 안 됨(배포 직후면 정상) — 이전 버전($(cat "$spec_file"))을 쓰다가 자동 교체된다" >&2
         return 0
       fi
       spec=claude-library-mcp
     fi
   fi
+  rm -f "$pending_file" "$pending_file.tried"
   printf '%s\n' "$spec" > "$spec_file"
 }
 

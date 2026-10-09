@@ -1611,9 +1611,14 @@ STUB
   update_library_mcp main claude-library-mcp
   [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = "claude-library-mcp==$version" ]
   grep -q -- "--refresh-package claude-library-mcp .*--from claude-library-mcp==$version claude-library-kb --help" "$TEST_HOME/uvx.log"
+  [ ! -e "$CLAUDE_DIR/hooks/.learnings-kb-pending" ]
   printf 'claude-library-mcp==0.0.1\n' > "$CLAUDE_DIR/hooks/.learnings-kb-spec"
   UVX_FAIL=1 update_library_mcp main claude-library-mcp
   [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = "claude-library-mcp==0.0.1" ]
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-pending")" = "claude-library-mcp==$version" ]
+  update_library_mcp main claude-library-mcp
+  [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = "claude-library-mcp==$version" ]
+  [ ! -e "$CLAUDE_DIR/hooks/.learnings-kb-pending" ]
   rm "$CLAUDE_DIR/hooks/.learnings-kb-spec"
   UVX_FAIL=1 update_library_mcp main claude-library-mcp
   [ "$(cat "$CLAUDE_DIR/hooks/.learnings-kb-spec")" = claude-library-mcp ]

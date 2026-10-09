@@ -286,3 +286,34 @@ def test_library_search_includes_global_and_current_repo_decisions(tmp_path, mon
     assert 'decisions/other/' not in result
     assert 'decisions/mine/process/d.md' in server.library_search('배포 태그')
     assert '결정사항 없음' in server.library_search('zzzz')
+
+
+def test_promote_pending_installs_in_background_and_swaps_spec(tmp_path, monkeypatch):
+    import time as _time
+    hooks = tmp_path / 'hooks'
+    hooks.mkdir()
+    (hooks / '.learnings-kb-spec').write_text('claude-library-mcp==0.0.1\n')
+    (hooks / '.learnings-kb-pending').write_text('claude-library-mcp==0.0.2\n')
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    uvx = bin_dir / 'uvx'
+    uvx.write_text('#!/bin/sh\necho "$@" >> "%s"\n[ -e "%s" ] && exit 1\nexit 0\n' % (tmp_path / 'uvx.log', tmp_path / 'fail'))
+    uvx.chmod(0o755)
+    monkeypatch.setenv('PATH', f'{bin_dir}:/usr/bin:/bin')
+    (tmp_path / 'fail').touch()
+    trigger.promote_pending(hooks)
+    _time.sleep(.5)
+    assert (hooks / '.learnings-kb-spec').read_text().strip() == 'claude-library-mcp==0.0.1'
+    assert (hooks / '.learnings-kb-pending').exists()
+    (tmp_path / 'fail').unlink()
+    trigger.promote_pending(hooks)  # 10분 안에는 다시 시도하지 않는다
+    _time.sleep(.5)
+    assert (tmp_path / 'uvx.log').read_text().count('--from') == 1
+    (hooks / '.learnings-kb-pending.tried').unlink()
+    trigger.promote_pending(hooks)
+    for _ in range(50):
+        if not (hooks / '.learnings-kb-pending').exists():
+            break
+        _time.sleep(.1)
+    assert (hooks / '.learnings-kb-spec').read_text().strip() == 'claude-library-mcp==0.0.2'
+    assert '--refresh-package claude-library-mcp' in (tmp_path / 'uvx.log').read_text()

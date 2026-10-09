@@ -129,8 +129,34 @@ def command():
     return ['uvx', '--with', 'mcp<2', '--from', spec, 'claude-library-kb']
 
 
+def promote_pending(hooks=None):
+    """업데이트 때 설치하지 못한 새 CLI 버전을 검색과 분리해 백그라운드로 설치하고, 성공하면 그 버전으로 바꾼다.
+
+    방금 배포한 버전은 PyPI·uv 목록 캐시가 갱신될 때까지(수 분) 설치되지 않는다.
+    hook 시간 안에서 기다리면 검색이 매번 시간 초과되므로 10분에 한 번만 따로 시도한다.
+    """
+    hooks = Path(hooks or Path.home() / '.claude/hooks')
+    pending, stamp = hooks / '.learnings-kb-pending', hooks / '.learnings-kb-pending.tried'
+    uvx = shutil.which('uvx')
+    if not uvx or not pending.exists():
+        return
+    try:
+        if stamp.exists() and time.time() - stamp.stat().st_mtime < 600:
+            return
+        stamp.touch()
+        spec = pending.read_text().strip()
+        script = ('"$0" --refresh-package claude-library-mcp --with "mcp<2" --from "$1" claude-library-kb --help >/dev/null 2>&1'
+                  ' && [ "$(cat "$2" 2>/dev/null)" = "$1" ] && mv "$2" "$3" && rm -f "$4"')
+        subprocess.Popen(['sh', '-c', script, uvx, spec, str(pending), str(hooks / '.learnings-kb-spec'), str(stamp)],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+    except Exception:
+        pass
+
+
 def run(payload):
     started = time.monotonic()
+    promote_pending()
     tool = payload.get('tool_name')
     data = payload.get('tool_input') or {}
     response = payload.get('tool_response') or {}
