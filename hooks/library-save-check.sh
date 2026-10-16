@@ -71,6 +71,15 @@ for l in lines[marker:total]:
     texts = []
     if isinstance(c, list):
         texts = [b['text'] for b in c if isinstance(b, dict) and b.get('type') == 'text']
+        # 메모리·규칙 파일 쓰기는 tool_use에만 있다 → 결정이 메모리에만 남고 리뷰에서 안 보이던 구멍(2026-10-16)
+        for b in c:
+            if not (isinstance(b, dict) and b.get('type') == 'tool_use' and b.get('name') in ('Write', 'Edit')):
+                continue
+            inp = b.get('input') or {}
+            fp = str(inp.get('file_path', ''))
+            if '/memory/' in fp or fp.endswith('CLAUDE.md') or '/.claude/rules/' in fp:
+                body_ = inp.get('content') or inp.get('new_string') or ''
+                texts.append(f"[메모리/규칙 파일 쓰기] {fp}\n{body_[:1500]}")
     elif isinstance(c, str):
         texts = [c]
     body = '\n'.join(x for x in texts if x.strip())
@@ -108,5 +117,5 @@ fi
 
 jq -n --arg path "$EXCERPT_FILE" '{
   "decision": "block",
-  "reason": ("다음만 수행하고 다른 행동은 하지 마라:\n\nrun_in_background=true로 Agent(general-purpose) 1개를 띄운다. subagent 프롬프트:\n---\n파일 \($path) 를 Read 해라. 최근 대화 발췌(user/assistant 텍스트)다. 이걸 '"'"'이번 세션 대화'"'"'로 간주하고 session-review 기준을 적용해라:\n1. 에러/삽질로 알게 된 API/라이브러리 동작\n2. 사용자가 접근법을 교정한 것\n3. 실패한 접근법과 이유\n4. 자명하지 않은 설계 결정\n저장 가치가 있으면 ~/claude-library 규칙대로 파일 작성 + commit/push. 없으면 아무것도 하지 마라. 끝나면 \($path) 를 rm 해라.\n---\nbackground Agent를 띄운 직후 추가 설명 없이 응답을 끝내라. 체크리스트를 인라인으로 직접 수행하지 마라.")
+  "reason": ("다음만 수행하고 다른 행동은 하지 마라:\n\nrun_in_background=true로 Agent(general-purpose) 1개를 띄운다. subagent 프롬프트:\n---\n파일 \($path) 를 Read 해라. 최근 대화 발췌(user/assistant 텍스트)다. 이걸 '"'"'이번 세션 대화'"'"'로 간주하고 session-review 기준을 적용해라:\n1. 에러/삽질로 알게 된 API/라이브러리 동작\n2. 사용자가 접근법을 교정한 것\n3. 실패한 접근법과 이유\n4. 자명하지 않은 설계 결정\n5. 사용자가 정한 결정·교정(\"~하기로 함\", \"~안 한다고 했잖아\", 방향 확정) — 한 프로젝트 전용이어도 버리지 말고 ~/claude-library/decisions/<레포명 또는 _global>/<architecture|stack|convention|process|scope>/ 에 type: Decision 으로 남긴다. **메모리(memory/*.md)·CLAUDE.md에 이미 적혔다는 이유로 건너뛰지 마라** — 메모리는 그 프로젝트 세션에만 보이고 다른 레포·계정 세션엔 안 보인다. 발췌의 [메모리/규칙 파일 쓰기] 항목 중 결정인 것은 decisions/ 에 같은 내용이 있는지 grep 해 보고 없으면 승격한다. 「프로젝트 전용이라 library 대상 아님」은 지식(library/)에만 해당하는 판단이다.\n저장 가치가 있으면 ~/claude-library 규칙대로 파일 작성 + commit/push. 없으면 아무것도 하지 마라. 끝나면 \($path) 를 rm 해라.\n---\nbackground Agent를 띄운 직후 추가 설명 없이 응답을 끝내라. 체크리스트를 인라인으로 직접 수행하지 마라.")
 }'
