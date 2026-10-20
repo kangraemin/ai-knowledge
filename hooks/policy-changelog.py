@@ -204,7 +204,9 @@ def main():
     if missing:
         state['blocks'] += 1
         reason = '정책 변경 이력이 필요합니다:\n' + '\n'.join(missing)
-        reason += '\n## 변경 이력 아래 추가 예시: - ' + datetime.date.today().isoformat() + ' · codex · 규칙 수정 · 이유: 사후 기록 — 이유 미확인 · 근거: session:' + sid
+        reason += '\n## 변경 이력 아래 추가 예시: - ' + datetime.date.today().isoformat() + ' · claude-code/<모델> · 규칙 수정 · 이유: <왜 바꿨나> · 근거: session:' + sid
+        # 형식이 틀린 줄은 이력으로 세지 않아 같은 차단이 반복된다. 허용 형식을 함께 알린다.
+        reason += '\n작성자 칸은 claude-code/<모델>, codex, human:kangraemin, process:<이름> 중 하나만 인정된다(claude 단독 등은 무효).'
         if state['blocks'] < 3:
             print(json.dumps({'decision': 'block', 'reason': reason}, ensure_ascii=False))
         else:
