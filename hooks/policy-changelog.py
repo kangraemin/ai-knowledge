@@ -142,6 +142,82 @@ def update_doc(src, dst, version):
     print(f'  {dst.name} 갱신 및 변경 이력 추가')
 
 
+GENERIC = {'CLAUDE.md', 'GUIDE.md', 'TAXONOMY.md', 'README.md', 'index.md'}
+
+
+def needles(path):
+    # 이 세션의 도구 호출에 이 파일이 등장했는지 볼 이름들. 절대·~·라이브러리 기준 상대 경로, 고유한 파일명.
+    forms = {str(path)}
+    for base, prefix in ((HOME, '~/'), (LIB, ''), (CLAUDE, '.claude/')):
+        try:
+            forms.add(prefix + str(path.relative_to(base)))
+        except ValueError:
+            pass
+    forms.add(path.name)
+    return [f.encode() for f in forms if f and f not in GENERIC]
+
+
+def transcripts(data):
+    main = data.get('transcript_path')
+    if not isinstance(main, str) or not os.path.isfile(main):
+        return None
+    files = [Path(main)]
+    files += sorted((Path(main).with_suffix('') / 'subagents').glob('*.jsonl'))
+    return files
+
+
+EDITORS = {'Write', 'Edit', 'MultiEdit', 'NotebookEdit'}
+# 셸에서 파일을 바꾸는 흔적. 2>&1 같은 리다이렉트는 쓰기가 아니다.
+WRITES = re.compile(r'(?<![0-9&])>|sed -i|perl -i|\btee\b|\bmv\b|\bcp\b|\brm\b|write|git (?:checkout|restore|apply)|\bpatch\b|truncate')
+
+
+def edited(line):
+    # 도구 호출 입력 중 파일을 바꾸는 것만 돌려준다. 읽기나 차단 메시지에 경로가 나온 것으로는 이 세션 것으로 보지 않는다
+    # (차단 사유에 남의 파일 경로가 적혀 transcript 에 남으면 그걸로 다시 이 세션 것으로 잡히는 순환이 있었다).
+    try:
+        content = json.loads(line).get('message', {}).get('content')
+    except (ValueError, AttributeError):
+        return []
+    out = []
+    for block in content if isinstance(content, list) else []:
+        if not isinstance(block, dict) or block.get('type') != 'tool_use':
+            continue
+        inp = block.get('input') or {}
+        if block.get('name') in EDITORS:
+            out.append(str(inp.get('file_path') or inp.get('notebook_path') or ''))
+        elif block.get('name') == 'Bash':
+            command = str(inp.get('command', ''))
+            if WRITES.search(command):
+                out.append(command)
+    return out
+
+
+def mine(files, paths):
+    # 다른 세션이 바꾼 파일로 이 세션을 막지 않는다(2026-10-21: 30여 개 세션이 남의 decisions 수정으로 계속 차단됨).
+    # transcript 를 읽을 수 없으면 판단할 근거가 없으므로 예전처럼 전부 이 세션 것으로 본다.
+    if files is None:
+        return set(paths)
+    wanted = {p: needles(Path(p)) for p in paths}
+    found = set()
+    for file in files:
+        try:
+            with open(file, 'rb') as stream:
+                for line in stream:
+                    if len(found) == len(wanted):
+                        return found
+                    if b'"tool_use"' not in line:
+                        continue
+                    hits = [p for p, forms in wanted.items()
+                            if p not in found and any(f in line for f in forms)]
+                    if not hits:
+                        continue
+                    texts = [t.encode() for t in edited(line)]
+                    found.update(p for p in hits if any(f in t for t in texts for f in wanted[p]))
+        except OSError:
+            continue
+    return found
+
+
 def save(path, state):
     fd, tmp = tempfile.mkstemp(dir=path.parent)
     try:
@@ -185,18 +261,33 @@ def main():
         return
     state = json.loads(snapshot.read_text())
     current = policies()
-    missing, counts = [], {}
+    changed = {}
     for key in sorted(set(state['files']) | set(current)):
         path = Path(key)
         now = record(path)
         prev = state['files'].get(key, {'sha256': '', 'content': '', 'count': 0})
-        counts[key] = now['count']
         if now['sha256'] == prev['sha256']:
             continue
         if path == CLAUDE / 'CLAUDE.md' and toc_only(prev['content'], now['content']):
             continue
         if now['count'] <= prev['count']:
-            missing.append(f'{path} → 이력 위치: {location(path)}')
+            changed[key] = now
+    owned = set(state.get('owned', []))
+    owned |= mine(transcripts(data), [k for k in changed if k not in owned])
+    state['owned'] = sorted(owned)
+    missing = []
+    for key, now in changed.items():
+        if key not in owned:
+            # 남의 변경은 기준선으로 받아들인다. 이후 이 세션이 고치면 그때 다시 검사된다.
+            if Path(key).is_file():
+                state['files'][key] = now
+            else:
+                state['files'].pop(key, None)
+            continue
+        missing.append(f'{Path(key)} → 이력 위치: {location(Path(key))}')
+    counts = {k: count(location(Path(k))) for k in owned}
+    # 차단 중인 이 세션 파일에 이력이 늘었을 때만 연속 차단 횟수를 되돌린다.
+    # 예전엔 아무 파일이나(다른 세션 것 포함) 이력이 늘면 되돌려서 경고로 낮아지지 않고 영원히 막혔다.
     seen = state.get('seen_counts', {})
     if any(n > seen.get(k, state['files'].get(k, {}).get('count', 0)) for k, n in counts.items()):
         state['blocks'] = 0

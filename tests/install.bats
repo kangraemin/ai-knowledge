@@ -1430,6 +1430,57 @@ policy_entry() {
   policy_event Stop | jq -e '.decision == "block"'
 }
 
+policy_stop_with() {
+  jq -cn --arg t "$1" '{session_id:"policy-test",hook_event_name:"Stop",stop_hook_active:true,transcript_path:$t}' |
+    bash "$SOURCE_DIR/hooks/policy-changelog-check.sh"
+}
+
+@test "TC-125: changes made by another session do not block and become the new baseline" {
+  mkdir -p "$LIB_DIR/decisions/demo/process"
+  printf '# 결정\n원래\n' > "$LIB_DIR/decisions/demo/process/other-session.md"
+  policy_fixture
+  # 차단 메시지·읽기·조회 명령에 경로가 나온 것은 이 세션이 고친 게 아니다
+  p="$LIB_DIR/decisions/demo/process/other-session.md"
+  {
+    jq -cn --arg p "$p" '{type:"user",message:{content:("정책 변경 이력이 필요합니다:\n"+$p)}}'
+    jq -cn --arg p "$p" '{type:"assistant",message:{content:[{type:"tool_use",name:"Read",input:{file_path:$p}}]}}'
+    jq -cn --arg p "$p" '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:("git log -- "+$p+" 2>&1")}}]}}'
+  } > "$TEST_HOME/t.jsonl"
+  echo '남이 고침' >> "$LIB_DIR/decisions/demo/process/other-session.md"
+  echo '남이 고침' >> "$LIB_DIR/GUIDE.md"
+  [ -z "$(policy_stop_with "$TEST_HOME/t.jsonl")" ]
+  [ -z "$(policy_stop_with "$TEST_HOME/t.jsonl")" ]
+  jq -e --arg p "$LIB_DIR/GUIDE.md" '.files[$p].content | contains("남이 고침")' "$CLAUDE_DIR/hooks/.policy-snapshots/policy-test.json"
+}
+
+@test "TC-126: files this session or its subagents edited still block" {
+  mkdir -p "$LIB_DIR/decisions/demo/process" "$TEST_HOME/t/subagents"
+  printf '# 결정\n원래\n' > "$LIB_DIR/decisions/demo/process/mine.md"
+  policy_fixture
+  : > "$TEST_HOME/t.jsonl"
+  jq -cn --arg p "$LIB_DIR/decisions/demo/process/mine.md" '{type:"assistant",message:{content:[{type:"tool_use",name:"Edit",input:{file_path:$p}}]}}' > "$TEST_HOME/t/subagents/agent-1.jsonl"
+  echo '내가 고침' >> "$LIB_DIR/decisions/demo/process/mine.md"
+  policy_stop_with "$TEST_HOME/t.jsonl" | jq -e '.decision == "block" and (.reason | contains("mine.md"))'
+  printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"echo x >> GUIDE.md"}}]}}\n' > "$TEST_HOME/t2.jsonl"
+  echo changed >> "$LIB_DIR/GUIDE.md"
+  # GUIDE.md 처럼 흔한 파일명은 경로 없이 이름만 나온 것으로는 이 세션 것으로 보지 않는다
+  policy_stop_with "$TEST_HOME/t2.jsonl" | jq -e '(.reason | contains("GUIDE.md")) | not'
+}
+
+@test "TC-127: history added by another session does not reset the block counter" {
+  mkdir -p "$LIB_DIR/decisions/demo/process"
+  printf '# 결정\n원래\n' > "$LIB_DIR/decisions/demo/process/mine.md"
+  printf '# 결정\n원래\n' > "$LIB_DIR/decisions/demo/process/other.md"
+  policy_fixture
+  printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"sed -i x decisions/demo/process/mine.md"}}]}}\n' > "$TEST_HOME/t.jsonl"
+  echo '내가 고침' >> "$LIB_DIR/decisions/demo/process/mine.md"
+  policy_stop_with "$TEST_HOME/t.jsonl" | jq -e '.decision == "block"'
+  policy_entry "$LIB_DIR/decisions/demo/process/other.md"
+  policy_stop_with "$TEST_HOME/t.jsonl" | jq -e '.decision == "block"'
+  policy_entry "$LIB_DIR/decisions/demo/process/other.md"
+  policy_stop_with "$TEST_HOME/t.jsonl" | jq -e 'has("decision") | not'
+}
+
 @test "TC-118: install update register policy and async usage exactly once and uninstall removes them" {
   [ -f "$SOURCE_DIR/hooks/library-usage-log.sh" ] || printf '#!/bin/bash\nexit 0\n' > "$SOURCE_DIR/hooks/library-usage-log.sh"
   install_with_input 1 --profile maintainer
