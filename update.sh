@@ -117,6 +117,7 @@ copy_if_changed "$PACKAGE_DIR/scripts/update-check.sh" "$HOOK_DIR/learnings-upda
 copy_if_changed "$PACKAGE_DIR/hooks/code-lesson-check.sh" "$HOOK_DIR/code-lesson-check.sh" "code-lesson-check.sh (stop hook)"
 copy_if_changed "$PACKAGE_DIR/hooks/library-allow.sh" "$HOOK_DIR/library-allow.sh" "library-allow.sh (pretooluse hook)"
 copy_if_changed "$PACKAGE_DIR/hooks/decision-inject.sh" "$HOOK_DIR/decision-inject.sh" "decision-inject.sh (sessionstart hook)"
+copy_if_changed "$PACKAGE_DIR/hooks/decision_inject.py" "$HOOK_DIR/decision_inject.py" "decision_inject.py (sessionstart hook)"
 copy_if_changed "$PACKAGE_DIR/hooks/library-activity-log.sh" "$HOOK_DIR/library-activity-log.sh" "library-activity-log.sh (posttooluse hook)"
 # GUIDE.md / TAXONOMY.md 는 사용자가 계속 편집하는 파일이다
 # (CLAUDE.md 가 "TAXONOMY.md 에 먼저 추가 후 저장"을 지시한다).
@@ -274,7 +275,15 @@ fi
 
 # --- PreToolUse 훅: library-allow 등록 (누락 시 보충) ---
 if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
-  if grep -qF "library-allow" "$SETTINGS" 2>/dev/null; then
+  if [ "$(jq -r '.permissions.defaultMode // ""' "$SETTINGS")" = bypassPermissions ]; then
+    # 권한 확인 창이 없으면 허용 응답은 효과가 없다. 예전에 등록된 것도 뺀다(2026-10-22 훅 감사)
+    if grep -qF "library-allow" "$SETTINGS"; then
+      jq '.hooks.PreToolUse |= ((. // []) | map(.hooks |= map(select((.command // "") | contains("library-allow") | not))) | map(select(.hooks | length > 0)))' \
+        "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
+      ok "bypassPermissions — library-allow 훅 등록 해제"
+      UPDATED=$((UPDATED + 1))
+    fi
+  elif grep -qF "library-allow" "$SETTINGS" 2>/dev/null; then
     skip "library-allow 훅 이미 등록됨"
   else
     LIBRARY_ALLOW_DEST="$HOME/.claude/hooks/library-allow.sh"

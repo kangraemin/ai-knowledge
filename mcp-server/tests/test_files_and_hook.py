@@ -165,3 +165,15 @@ def test_hook_runs_real_cli_evidence_gate(tmp_path, monkeypatch):
         assert bool(out.stdout.strip()) is expected
         if expected:
             assert 'library/restore.md' in json.loads(out.stdout)['hookSpecificOutput']['additionalContext']
+
+
+def test_library_search_drops_weak_tail(monkeypatch):
+    import server
+
+    rows = [{"path": f"library/t/{i}.md", "title": str(i), "description": "", "score": s}
+            for i, s in enumerate([1.0, .9, .8, .5, .3, .2, .1])]
+    monkeypatch.setattr(server, "_search", lambda q: [dict(r) for r in rows])
+    monkeypatch.setattr(server, "_related_decisions", lambda q: [])
+    monkeypatch.setattr("kb.activity.search_event", lambda *a, **k: None)
+    result = server.library_search("q")
+    assert [line.split(" · ")[0] for line in result.splitlines()] == [f"library/t/{i}.md" for i in range(4)]

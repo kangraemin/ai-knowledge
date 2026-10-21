@@ -186,17 +186,25 @@ def edited(line):
         if block.get('name') in EDITORS:
             out.append(str(inp.get('file_path') or inp.get('notebook_path') or ''))
         elif block.get('name') == 'Bash':
+            # 파일이 쓰기 표시 뒤에 나올 때만 바꾼 것으로 본다. `cat 파일 > /tmp/x` 같은 읽기는 소유가 아니다.
             command = str(inp.get('command', ''))
-            if WRITES.search(command):
-                out.append(command)
+            if '<<' in command:  # heredoc 스크립트는 경로와 쓰기가 다른 줄에 있을 수 있어 통째로 본다
+                if WRITES.search(command):
+                    out.append(command)
+                continue
+            for segment in re.split(r'&&|\|\||;|\|(?!\|)|\n', command):
+                hit = WRITES.search(segment)
+                if hit:
+                    out.append(segment[hit.start():])
     return out
 
 
 def mine(files, paths):
     # 다른 세션이 바꾼 파일로 이 세션을 막지 않는다(2026-10-21: 30여 개 세션이 남의 decisions 수정으로 계속 차단됨).
-    # transcript 를 읽을 수 없으면 판단할 근거가 없으므로 예전처럼 전부 이 세션 것으로 본다.
+    # transcript 를 읽을 수 없으면 판단할 근거가 없다. 전부 이 세션 것으로 보면 남의 변경으로 막는 예전 버그가 되살아나므로
+    # 검사하지 않는다(호출한 쪽이 경고를 띄운다).
     if files is None:
-        return set(paths)
+        return set()
     wanted = {p: needles(Path(p)) for p in paths}
     found = set()
     for file in files:
@@ -273,7 +281,10 @@ def main():
         if now['count'] <= prev['count']:
             changed[key] = now
     owned = set(state.get('owned', []))
-    owned |= mine(transcripts(data), [k for k in changed if k not in owned])
+    files = transcripts(data)
+    if files is None and changed:
+        print(json.dumps({'systemMessage': '정책 변경 이력 검사 건너뜀: transcript 를 읽지 못해 누가 고쳤는지 알 수 없음'}, ensure_ascii=False))
+    owned |= mine(files, [k for k in changed if k not in owned])
     state['owned'] = sorted(owned)
     missing = []
     for key, now in changed.items():
@@ -283,6 +294,10 @@ def main():
                 state['files'][key] = now
             else:
                 state['files'].pop(key, None)
+            continue
+        if not Path(key).is_file():
+            # 이 세션이 지우거나 이름을 바꾼 파일은 이력 달 곳이 없다. 이력은 새 경로 파일에 단다.
+            state['files'].pop(key, None)
             continue
         missing.append(f'{Path(key)} → 이력 위치: {location(Path(key))}')
     counts = {k: count(location(Path(k))) for k in owned}

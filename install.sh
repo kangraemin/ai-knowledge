@@ -482,7 +482,10 @@ fi
 # --- PreToolUse 훅: library-allow (permission dialog 우회) ---
 LIBRARY_ALLOW_DEST="$CLAUDE_DIR/hooks/library-allow.sh"
 
-if grep -qF "library-allow" "$SETTINGS" 2>/dev/null; then
+if [ "$(jq -r '.permissions.defaultMode // ""' "$SETTINGS" 2>/dev/null)" = bypassPermissions ]; then
+  # 권한 확인 창이 아예 없으면 허용 응답은 효과가 없고 Write/Edit 마다 실행 비용만 든다
+  echo "  $(msg 'bypassPermissions — library-allow 훅 불필요, 스킵' 'bypassPermissions — library-allow hook not needed, skipped')"
+elif grep -qF "library-allow" "$SETTINGS" 2>/dev/null; then
   echo "  $(msg 'library-allow 훅 이미 존재 — 스킵' 'library-allow hook already exists — skipped')"
 elif ! command -v jq >/dev/null 2>&1; then
   echo "  $(msg '경고: jq 없음 — library-allow 훅 스킵' 'Warning: jq not found — library-allow hook skipped')"
@@ -550,6 +553,8 @@ for H in decision-inject library-activity-log; do
     echo "  $(msg "경고: $H.sh 소스 없음 — 스킵" "warning: $H.sh source missing — skipped")"
   fi
 done
+# decision-inject.sh 는 본체 decision_inject.py 를 exec 한다
+[ -f "$SCRIPT_DIR/hooks/decision_inject.py" ] && cp "$SCRIPT_DIR/hooks/decision_inject.py" "$CLAUDE_DIR/hooks/decision_inject.py"
 
 if command -v jq >/dev/null 2>&1; then
   # SessionStart: 현재 레포의 active 결정사항 주입

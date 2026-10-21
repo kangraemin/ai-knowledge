@@ -96,6 +96,13 @@ def test_parse_error_and_disabled(tmp_path, library, monkeypatch):
     assert len(list(usage.records('usage-*.jsonl', library))) == 1
 
 
+def test_no_user_prompt_is_skipped_not_parse_error(tmp_path, library):
+    path = tmp_path / 'tools-only.jsonl'
+    path.write_text(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'hi'}]}}) + '\n')
+    assert usage.log_usage(path) is None
+    assert list(usage.records('usage-*.jsonl', library)) == []
+
+
 def test_timeout_handler(tmp_path, library, monkeypatch):
     def expired(*args):
         raise TimeoutError()

@@ -1269,7 +1269,7 @@ compact_input() {
     '{hook_event_name:$event, session_id:"compact-test", transcript_path:$path}'
 }
 compact_transcript() {
-  printf '%s\n' '{"type":"user","message":{"content":"압축 전 교훈"}}' > "$TEST_HOME/transcript.jsonl"
+  printf '%s\n' '{"type":"user","message":{"content":"압축 전 교훈: 그 방식 말고 앞으로는 스냅샷을 먼저 비교하는 쪽으로 하기로 하자"}}' > "$TEST_HOME/transcript.jsonl"
 }
 
 @test "TC-103: PreCompact emits nothing and next Stop prioritizes preserved excerpt" {
@@ -1290,6 +1290,7 @@ compact_transcript() {
 @test "TC-104: repeated PreCompact accumulates only incremental text" {
   compact_transcript
   compact_input PreCompact | bash "$SOURCE_DIR/hooks/library-save-check.sh"
+  echo '{"type":"user","message":{"content":"그게 아니라 캐시를 먼저 지우고 다시 돌려야 한다고 했잖아, 앞으로 그렇게 해"}}' >> "$TEST_HOME/transcript.jsonl"
   echo '{"type":"assistant","message":{"content":[{"type":"text","text":"새 교훈"},{"type":"tool_use","name":"secret-tool"}]}}' >> "$TEST_HOME/transcript.jsonl"
   compact_input PreCompact | bash "$SOURCE_DIR/hooks/library-save-check.sh"
   compact_input PreCompact | bash "$SOURCE_DIR/hooks/library-save-check.sh"
@@ -1326,6 +1327,14 @@ compact_transcript() {
   [ -z "$(compact_input Stop | bash "$SOURCE_DIR/hooks/library-save-check.sh")" ]
 }
 
+@test "TC-130: save-check skips review when excerpt has no correction/decision signal" {
+  printf '%s\n' '{"type":"user","message":{"content":"오늘 날씨 어때? 내일 일정도 정리해서 보여줘 그리고 점심 메뉴도 추천해줘"}}' > "$TEST_HOME/transcript.jsonl"
+  mkdir -p "$CLAUDE_DIR/hooks/.counters"
+  echo 19 > "$CLAUDE_DIR/hooks/.counters/.library-check-counter-compact-test"
+  [ -z "$(compact_input Stop | bash "$SOURCE_DIR/hooks/library-save-check.sh")" ]
+  ! ls "$CLAUDE_DIR"/hooks/.library-review-excerpt-compact-test-* 2>/dev/null
+}
+
 @test "TC-108: uninstall removes PreCompact registration and preserves custom hook" {
   install_with_input 1
   jq '.hooks.PreCompact += [{hooks:[{type:"command",command:"custom-hook"}]}]' "$SETTINGS" > "$TEST_HOME/settings-new"
@@ -1338,7 +1347,12 @@ compact_transcript() {
 
 # ─── 정책 변경 이력 ─────────────────────────────────────────────
 policy_event() {
-  printf '{"session_id":"policy-test","hook_event_name":"%s","stop_hook_active":true}\n' "$1" |
+  # 검사는 이 세션이 고친 파일만 본다 — 테스트가 손대는 정책 파일을 이 세션이 Write 한 것으로 기록해 둔다
+  local t="$TEST_HOME/policy-transcript.jsonl" p
+  for p in "$CLAUDE_DIR/CLAUDE.md" "$LIB_DIR/GUIDE.md" "$CLAUDE_DIR/rules/custom.md" "$LIB_DIR/decisions/demo/process/test.md"; do
+    jq -cn --arg p "$p" '{type:"assistant",message:{content:[{type:"tool_use",name:"Write",input:{file_path:$p}}]}}'
+  done > "$t"
+  jq -cn --arg e "$1" --arg t "$t" '{session_id:"policy-test",hook_event_name:$e,stop_hook_active:true,transcript_path:$t}' |
     bash "$SOURCE_DIR/hooks/policy-changelog-check.sh"
 }
 policy_fixture() {
@@ -1451,6 +1465,31 @@ policy_stop_with() {
   [ -z "$(policy_stop_with "$TEST_HOME/t.jsonl")" ]
   [ -z "$(policy_stop_with "$TEST_HOME/t.jsonl")" ]
   jq -e --arg p "$LIB_DIR/GUIDE.md" '.files[$p].content | contains("남이 고침")' "$CLAUDE_DIR/hooks/.policy-snapshots/policy-test.json"
+}
+
+@test "TC-131: a policy file this session deleted or renamed does not block" {
+  policy_fixture
+  rm "$LIB_DIR/GUIDE.md"
+  run policy_event Stop
+  [ "$status" -eq 0 ]
+  ! echo "$output" | grep -q '"decision": *"block"'
+  ! jq -e --arg p "$LIB_DIR/GUIDE.md" '.files | has($p)' "$CLAUDE_DIR/hooks/.policy-snapshots/policy-test.json"
+}
+
+@test "TC-128: unreadable transcript skips the check with a warning instead of blocking" {
+  policy_fixture
+  echo changed >> "$LIB_DIR/GUIDE.md"
+  run bash -c 'printf "{\"session_id\":\"policy-test\",\"hook_event_name\":\"Stop\"}\n" | bash "$SOURCE_DIR/hooks/policy-changelog-check.sh"'
+  echo "$output" | jq -e '(has("decision") | not) and (.systemMessage | contains("건너뜀"))'
+}
+
+@test "TC-129: reading a policy file into another file is not ownership" {
+  mkdir -p "$LIB_DIR/decisions/demo/process"
+  printf '# 결정\n원래\n' > "$LIB_DIR/decisions/demo/process/other.md"
+  policy_fixture
+  jq -cn --arg p "$LIB_DIR/decisions/demo/process/other.md" '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:("cat "+$p+" > /tmp/copy.md")}}]}}' > "$TEST_HOME/t.jsonl"
+  echo '남이 고침' >> "$LIB_DIR/decisions/demo/process/other.md"
+  [ -z "$(policy_stop_with "$TEST_HOME/t.jsonl")" ]
 }
 
 @test "TC-126: files this session or its subagents edited still block" {

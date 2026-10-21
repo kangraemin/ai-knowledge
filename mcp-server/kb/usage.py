@@ -35,6 +35,10 @@ def records(pattern, root):
             continue
 
 
+class NoPrompt(ValueError):
+    """사람 발화가 없는 턴(서브에이전트·훅 전용 transcript). 오류가 아니라 기록 대상이 아니다."""
+
+
 def append_turn(row, root=None):
     if os.environ.get('LIBRARY_LOG') == '0' or activity.mode() == 'off':
         return
@@ -138,7 +142,7 @@ def analyze(transcript, session, cwd, root):
                 rows.append(row)
     starts = [i for i, row in enumerate(rows) if human_prompt(row)]
     if not starts:
-        raise ValueError('no user prompt')
+        raise NoPrompt('no user prompt')
     turn = rows[starts[-1]:]
     prompt = '\n'.join(str(b.get('text', '')) for b in blocks(turn[0]) if b.get('type') == 'text')
     start = stamp(turn[0]['timestamp']) if turn[0].get('timestamp') else None
@@ -273,6 +277,10 @@ def log_usage(transcript, session='', cwd=''):
     signal.setitimer(signal.ITIMER_REAL, 18)
     try:
         row.update(analyze(transcript, session, cwd, activity.root()))
+    except NoPrompt:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+        return None
     except Exception as exc:
         row.update(labels=['parse_error'], error=type(exc).__name__)
     activity.redact(row, 'prompt')

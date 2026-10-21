@@ -174,6 +174,9 @@ def library_search(query: str) -> str:
         return api.search_text(query)
     start = time.monotonic()
     matches = _search(query)
+    # 1위 점수의 40% 미만인 꼬리는 뺀다(2026-10 검색 1082건: 6·7위의 40~46%가 여기 해당, 결과 중간값 3.5KB).
+    if matches:
+        matches = matches[:3] + [m for m in matches[3:] if m["score"] >= matches[0]["score"] * 0.4]
     from kb.activity import search_event
     search_event(query, matches, "files", (time.monotonic() - start) * 1000, library_root=LIBRARY_ROOT)
 

@@ -33,7 +33,10 @@ SHELL_NOISE = re.compile(r'^(?:\(eval\):\d+:|zsh:|bash: line \d+:|✓|The above 
 # 내장 예외만 있는 실패는 대개 방금 쓴 코드의 버그다. 모듈·패키지 오류는 유지한다.
 LOCAL_BUG = re.compile(r'^(?:TypeError|KeyError|ValueError|IndexError|AttributeError|NameError|'
                        r'UnboundLocalError|ZeroDivisionError|FileNotFoundError|SyntaxError|IndentationError|'
+                       r'AssertionError|PermissionError|UnicodeDecodeError|'
                        r'(?:json\.(?:decoder\.)?)?JSONDecodeError)\b')
+# 트레이스백에 찍힌 소스 줄은 오류 내용이 아니다(2026-10 오류 트리거 827회 중 주입 159회, 소스 줄 질의는 대부분 weak_evidence).
+SOURCE_LINE = re.compile(r'^(?:raise |except\b|with |try:|return |File ")')
 
 
 def result_rows(context):
@@ -50,7 +53,8 @@ def core_error(text):
     lines = [x for x in lines if not SHELL_NOISE.match(x)]
     # 오류 표식이 없는 줄(진행 로그 등)로는 검색하지 않는다.
     matches = [x for x in lines if (ERROR.search(x) or x.startswith('✗')) and not x.startswith('Traceback (')]
-    if not matches or all(LOCAL_BUG.match(x) or x.startswith('raise ') for x in matches):
+    matches = [x for x in matches if not SOURCE_LINE.match(x)]
+    if not matches or all(LOCAL_BUG.match(x) for x in matches):
         return ''
     return '\n'.join(matches[-2:])[:2000]
 
@@ -191,7 +195,7 @@ def run(payload):
         proc = subprocess.Popen(command() + args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True, start_new_session=True, env=env)
         try:
-            stdout, _ = proc.communicate(timeout=max(.1, 4.5 - (time.monotonic() - started)))
+            stdout, _ = proc.communicate(timeout=max(.1, 3.0 - (time.monotonic() - started)))  # 2026-10-22: 4.5→3초(p90 3.3초, 동기 실행이라 매번 기다림)
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid, signal.SIGKILL)
             proc.communicate()
@@ -229,6 +233,12 @@ def run(payload):
                 stream.write(json.dumps(record, ensure_ascii=False) + '\n')
         except Exception:
             pass
+    # 같은 세션에서 이미 넣은 문서만 나왔으면 다시 넣지 않는다(같은 문서 17번 반복 주입이 있었다).
+    sid = str(payload.get('session_id', ''))
+    if context and kind != 'write' and sid:
+        paths = [row['path'] for row in result_rows(context)]
+        if paths and not [p for p in [claim(sid, 'doc', p) and p for p in paths] if p]:
+            context = ''
     if context:
         print(json.dumps({'hookSpecificOutput': {'hookEventName': event, 'additionalContext': context}}, ensure_ascii=False))
 

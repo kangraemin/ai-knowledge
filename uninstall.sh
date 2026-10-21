@@ -67,7 +67,7 @@ for _h in decision-inject library-activity-log policy-inject library-save-check 
 done
 grep -qE "library-trigger|policy-changelog-check|library-usage-log|library-autoinject|decision-inject|library-activity-log|library-save-check|code-lesson-check|library-allow|learnings-update-check" "$SETTINGS" 2>/dev/null && _lfc_installed=1
 if [ "$_lfc_installed" = "1" ]; then
-  rm -f "$HOOK_DIR/decision-inject.sh" "$HOOK_DIR/library-activity-log.sh" "$HOOK_DIR/policy-inject.sh" \
+  rm -f "$HOOK_DIR/decision-inject.sh" "$HOOK_DIR/decision_inject.py" "$HOOK_DIR/library-activity-log.sh" "$HOOK_DIR/policy-inject.sh" \
         "$HOOK_DIR/library-save-check.sh" "$HOOK_DIR/code-lesson-check.sh" \
         "$HOOK_DIR/library-allow.sh" "$HOOK_DIR/learnings-update-check.sh" \
         "$HOOK_DIR/library-trigger.sh" "$HOOK_DIR/library-trigger.py" "$HOOK_DIR/library-sync.sh" "$HOOK_DIR/library-autoinject.sh" \
