@@ -214,11 +214,13 @@ if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
   fi
 fi
 
-# 정책 검사 런타임과 사용량 로거 배치
+# 정책 이력 런타임과 사용량 로거 배치
+# 정책 변경 이력 차단 검사(policy-changelog-check.sh)는 2026-10-22에 뺐다. 이력은 git 커밋에 남는다.
+rm -f "$HOME/.claude/hooks/policy-changelog-check.sh"
 if [ "$PROFILE" = user ]; then
-  rm -f "$HOME/.claude/hooks/policy-changelog-check.sh" "$HOME/.claude/hooks/policy-changelog.py"
+  rm -f "$HOME/.claude/hooks/policy-changelog.py"
 fi
-for hook in policy-changelog-check.sh policy-changelog.py library-usage-log.sh; do
+for hook in policy-changelog.py library-usage-log.sh; do
   if [ "$PROFILE" = user ] && [ "$hook" != library-usage-log.sh ]; then continue; fi
   if [ -f "$PACKAGE_DIR/hooks/$hook" ]; then
     mkdir -p "$HOME/.claude/hooks"
@@ -227,15 +229,13 @@ for hook in policy-changelog-check.sh policy-changelog.py library-usage-log.sh; 
   fi
 done
 
-# 정책 이력 검사와 턴 사용량 기록: 기존 등록을 정규화해 중복을 없앤다.
+# 턴 사용량 기록: 기존 등록을 정규화해 중복을 없애고, 예전 정책 이력 검사 등록은 지운다.
 if command -v jq >/dev/null 2>&1 && [ -f "$SETTINGS" ]; then
-  jq --arg profile "$PROFILE" --arg policy "$HOME/.claude/hooks/policy-changelog-check.sh" \
+  jq --arg policy "$HOME/.claude/hooks/policy-changelog-check.sh" \
      --arg usage "$HOME/.claude/hooks/library-usage-log.sh" '
     def strip($cmd): map(.hooks |= map(select(.command != $cmd))) | map(select(.hooks | length > 0));
-    .hooks.SessionStart = (((.hooks.SessionStart // []) | strip($policy)) +
-      (if $profile == "maintainer" then [{hooks: [{type: "command", command: $policy, timeout: 30}]}] else [] end)) |
+    .hooks.SessionStart = ((.hooks.SessionStart // []) | strip($policy)) |
     .hooks.Stop = (((.hooks.Stop // []) | strip($policy) | strip($usage)) +
-      (if $profile == "maintainer" then [{hooks: [{type: "command", command: $policy, timeout: 30}]}] else [] end) +
       [{hooks: [{type: "command", command: $usage, async: true, timeout: 30}]}])
   ' "$SETTINGS" > "$SETTINGS.tmp.$$" && mv "$SETTINGS.tmp.$$" "$SETTINGS"
 fi

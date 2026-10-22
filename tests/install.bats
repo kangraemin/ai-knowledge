@@ -1345,198 +1345,63 @@ compact_transcript() {
   [ ! -f "$CLAUDE_DIR/hooks/library-save-check.sh" ]
 }
 
-# ─── 정책 변경 이력 ─────────────────────────────────────────────
-policy_event() {
-  # 검사는 이 세션이 고친 파일만 본다 — 테스트가 손대는 정책 파일을 이 세션이 Write 한 것으로 기록해 둔다
-  local t="$TEST_HOME/policy-transcript.jsonl" p
-  for p in "$CLAUDE_DIR/CLAUDE.md" "$LIB_DIR/GUIDE.md" "$CLAUDE_DIR/rules/custom.md" "$LIB_DIR/decisions/demo/process/test.md"; do
-    jq -cn --arg p "$p" '{type:"assistant",message:{content:[{type:"tool_use",name:"Write",input:{file_path:$p}}]}}'
-  done > "$t"
-  jq -cn --arg e "$1" --arg t "$t" '{session_id:"policy-test",hook_event_name:$e,stop_hook_active:true,transcript_path:$t}' |
-    bash "$SOURCE_DIR/hooks/policy-changelog-check.sh"
-}
-policy_fixture() {
-  mkdir -p "$LIB_DIR" "$CLAUDE_DIR/rules"
-  printf '# 규칙\n### 목차\n- old\n## 실제 정책\n기존 정책\n' > "$CLAUDE_DIR/CLAUDE.md"
-  printf '# 가이드\n기존 정책\n' > "$LIB_DIR/GUIDE.md"
-  policy_event SessionStart
-}
-policy_entry() {
-  printf '\n## 변경 이력\n- 2026-10-05 · codex · 규칙 수정 · 이유: 테스트 · 근거: session:policy-test\n' >> "$1"
+# ─── 정책 이력 런타임 ───────────────────────────────────────────
+# 정책 변경 이력 차단 검사는 2026-10-22에 뺐다. policy-changelog.py 는 update.sh 이력 기록과
+# stop_commit.py 가 쓰는 "이 세션이 고친 파일" 판정(mine)만 남는다.
+policy_mine() {
+  # policy_mine <transcript> <경로>... → 이 세션이 고친 것으로 판정된 경로를 한 줄씩 출력
+  local t="$1"; shift
+  HOME="$TEST_HOME" python3 - "$SOURCE_DIR/hooks/policy-changelog.py" "$t" "$@" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location('pc', sys.argv[1])
+pc = importlib.util.module_from_spec(spec); spec.loader.exec_module(pc)
+files = pc.transcripts({'transcript_path': sys.argv[2]})
+print('\n'.join(sorted(pc.mine(files, sys.argv[3:]))))
+PY
 }
 
-@test "TC-109: policy snapshot contains hashes original text and history counts" {
-  policy_fixture
-  jq -e --arg p "$CLAUDE_DIR/CLAUDE.md" '.files[$p] | (.sha256 | length == 64) and (.content | contains("### 목차")) and .count == 0' "$CLAUDE_DIR/hooks/.policy-snapshots/policy-test.json"
-}
-
-@test "TC-110: policy change without history blocks with actionable paths" {
-  policy_fixture
-  echo changed >> "$LIB_DIR/GUIDE.md"
-  run policy_event Stop
-  [ "$status" -eq 0 ]
-  echo "$output" | jq -e --arg p "$LIB_DIR/GUIDE.md" '.decision == "block" and (.reason | contains($p)) and (.reason | contains("근거: session:"))'
-}
-
-@test "TC-111: appended history passes then a subsequent unlogged change blocks" {
-  policy_fixture
-  echo changed >> "$LIB_DIR/GUIDE.md"
-  policy_entry "$LIB_DIR/GUIDE.md"
-  [ -z "$(policy_event Stop)" ]
-  echo another >> "$LIB_DIR/GUIDE.md"
-  policy_event Stop | jq -e '.decision == "block"'
-}
-
-@test "TC-112: only CLAUDE table of contents changes are exempt" {
-  policy_fixture
-  sed 's/- old/- new/' "$CLAUDE_DIR/CLAUDE.md" > "$TEST_HOME/new"
-  mv "$TEST_HOME/new" "$CLAUDE_DIR/CLAUDE.md"
-  [ -z "$(policy_event Stop)" ]
-  echo '실제 규칙 변경' >> "$CLAUDE_DIR/CLAUDE.md"
-  policy_event Stop | jq -e '.decision == "block" and (.reason | contains("claude-md.md"))'
-}
-
-@test "TC-113: third Stop warns even with stop_hook_active true and history resets counter" {
-  policy_fixture
-  echo changed >> "$LIB_DIR/GUIDE.md"
-  policy_event Stop | jq -e '.decision == "block"'
-  policy_event Stop | jq -e '.decision == "block"'
-  policy_event Stop | jq -e 'has("decision") | not'
-  policy_entry "$LIB_DIR/GUIDE.md"
-  [ -z "$(policy_event Stop)" ]
-  echo new >> "$LIB_DIR/GUIDE.md"
-  policy_event Stop | jq -e '.decision == "block"'
-}
-
-@test "TC-114: env off disables snapshot and Stop enforcement" {
-  export POLICY_CHANGELOG_ENFORCE=0
-  policy_fixture
-  [ ! -f "$CLAUDE_DIR/hooks/.policy-snapshots/policy-test.json" ]
-  [ -z "$(policy_event Stop)" ]
-}
-
-@test "TC-115: Stop without snapshot does nothing" {
-  echo changed > "$CLAUDE_DIR/CLAUDE.md"
-  [ -z "$(policy_event Stop)" ]
-}
-
-@test "TC-116: rules use sidecars and new decisions require inline history" {
-  policy_fixture
-  echo rule > "$CLAUDE_DIR/rules/custom.md"
-  policy_event Stop | jq -e '.decision == "block" and (.reason | contains("rules-custom.md"))'
-  mkdir -p "$LIB_DIR/decisions/_global/changelog"
-  policy_entry "$LIB_DIR/decisions/_global/changelog/rules-custom.md"
-  [ -z "$(policy_event Stop)" ]
-  mkdir -p "$LIB_DIR/decisions/demo/process"
-  echo decision > "$LIB_DIR/decisions/demo/process/test.md"
-  policy_event Stop | jq -e '.decision == "block"'
-  policy_entry "$LIB_DIR/decisions/demo/process/test.md"
-  [ -z "$(policy_event Stop)" ]
-}
-
-@test "TC-117: repeated SessionStart preserves baseline and removes stale snapshots" {
-  policy_fixture
-  cp "$CLAUDE_DIR/hooks/.policy-snapshots/policy-test.json" "$CLAUDE_DIR/hooks/.policy-snapshots/stale.json"
-  touch -t 200001010000 "$CLAUDE_DIR/hooks/.policy-snapshots/stale.json"
-  echo changed >> "$LIB_DIR/GUIDE.md"
-  policy_event SessionStart
-  [ ! -f "$CLAUDE_DIR/hooks/.policy-snapshots/stale.json" ]
-  policy_event Stop | jq -e '.decision == "block"'
-}
-
-policy_stop_with() {
-  jq -cn --arg t "$1" '{session_id:"policy-test",hook_event_name:"Stop",stop_hook_active:true,transcript_path:$t}' |
-    bash "$SOURCE_DIR/hooks/policy-changelog-check.sh"
-}
-
-@test "TC-125: changes made by another session do not block and become the new baseline" {
-  mkdir -p "$LIB_DIR/decisions/demo/process"
-  printf '# 결정\n원래\n' > "$LIB_DIR/decisions/demo/process/other-session.md"
-  policy_fixture
-  # 차단 메시지·읽기·조회 명령에 경로가 나온 것은 이 세션이 고친 게 아니다
+@test "TC-125: reading or quoting a file path is not ownership" {
   p="$LIB_DIR/decisions/demo/process/other-session.md"
   {
     jq -cn --arg p "$p" '{type:"user",message:{content:("정책 변경 이력이 필요합니다:\n"+$p)}}'
     jq -cn --arg p "$p" '{type:"assistant",message:{content:[{type:"tool_use",name:"Read",input:{file_path:$p}}]}}'
     jq -cn --arg p "$p" '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:("git log -- "+$p+" 2>&1")}}]}}'
+    jq -cn --arg p "$p" '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:("cat "+$p+" > /tmp/copy.md")}}]}}'
   } > "$TEST_HOME/t.jsonl"
-  echo '남이 고침' >> "$LIB_DIR/decisions/demo/process/other-session.md"
-  echo '남이 고침' >> "$LIB_DIR/GUIDE.md"
-  [ -z "$(policy_stop_with "$TEST_HOME/t.jsonl")" ]
-  [ -z "$(policy_stop_with "$TEST_HOME/t.jsonl")" ]
-  jq -e --arg p "$LIB_DIR/GUIDE.md" '.files[$p].content | contains("남이 고침")' "$CLAUDE_DIR/hooks/.policy-snapshots/policy-test.json"
+  [ -z "$(policy_mine "$TEST_HOME/t.jsonl" "$p")" ]
 }
 
-@test "TC-131: a policy file this session deleted or renamed does not block" {
-  policy_fixture
-  rm "$LIB_DIR/GUIDE.md"
-  run policy_event Stop
-  [ "$status" -eq 0 ]
-  ! echo "$output" | grep -q '"decision": *"block"'
-  ! jq -e --arg p "$LIB_DIR/GUIDE.md" '.files | has($p)' "$CLAUDE_DIR/hooks/.policy-snapshots/policy-test.json"
-}
-
-@test "TC-128: unreadable transcript skips the check with a warning instead of blocking" {
-  policy_fixture
-  echo changed >> "$LIB_DIR/GUIDE.md"
-  run bash -c 'printf "{\"session_id\":\"policy-test\",\"hook_event_name\":\"Stop\"}\n" | bash "$SOURCE_DIR/hooks/policy-changelog-check.sh"'
-  echo "$output" | jq -e '(has("decision") | not) and (.systemMessage | contains("건너뜀"))'
-}
-
-@test "TC-129: reading a policy file into another file is not ownership" {
-  mkdir -p "$LIB_DIR/decisions/demo/process"
-  printf '# 결정\n원래\n' > "$LIB_DIR/decisions/demo/process/other.md"
-  policy_fixture
-  jq -cn --arg p "$LIB_DIR/decisions/demo/process/other.md" '{type:"assistant",message:{content:[{type:"tool_use",name:"Bash",input:{command:("cat "+$p+" > /tmp/copy.md")}}]}}' > "$TEST_HOME/t.jsonl"
-  echo '남이 고침' >> "$LIB_DIR/decisions/demo/process/other.md"
-  [ -z "$(policy_stop_with "$TEST_HOME/t.jsonl")" ]
-}
-
-@test "TC-126: files this session or its subagents edited still block" {
-  mkdir -p "$LIB_DIR/decisions/demo/process" "$TEST_HOME/t/subagents"
-  printf '# 결정\n원래\n' > "$LIB_DIR/decisions/demo/process/mine.md"
-  policy_fixture
+@test "TC-126: files this session or its subagents edited are owned, bare common names are not" {
+  mkdir -p "$TEST_HOME/t/subagents"
+  p="$LIB_DIR/decisions/demo/process/mine.md"
   : > "$TEST_HOME/t.jsonl"
-  jq -cn --arg p "$LIB_DIR/decisions/demo/process/mine.md" '{type:"assistant",message:{content:[{type:"tool_use",name:"Edit",input:{file_path:$p}}]}}' > "$TEST_HOME/t/subagents/agent-1.jsonl"
-  echo '내가 고침' >> "$LIB_DIR/decisions/demo/process/mine.md"
-  policy_stop_with "$TEST_HOME/t.jsonl" | jq -e '.decision == "block" and (.reason | contains("mine.md"))'
+  jq -cn --arg p "$p" '{type:"assistant",message:{content:[{type:"tool_use",name:"Edit",input:{file_path:$p}}]}}' > "$TEST_HOME/t/subagents/agent-1.jsonl"
+  [ "$(policy_mine "$TEST_HOME/t.jsonl" "$p")" = "$p" ]
   printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"echo x >> GUIDE.md"}}]}}\n' > "$TEST_HOME/t2.jsonl"
-  echo changed >> "$LIB_DIR/GUIDE.md"
-  # GUIDE.md 처럼 흔한 파일명은 경로 없이 이름만 나온 것으로는 이 세션 것으로 보지 않는다
-  policy_stop_with "$TEST_HOME/t2.jsonl" | jq -e '(.reason | contains("GUIDE.md")) | not'
+  [ -z "$(policy_mine "$TEST_HOME/t2.jsonl" "$LIB_DIR/GUIDE.md")" ]
 }
 
-@test "TC-127: history added by another session does not reset the block counter" {
-  mkdir -p "$LIB_DIR/decisions/demo/process"
-  printf '# 결정\n원래\n' > "$LIB_DIR/decisions/demo/process/mine.md"
-  printf '# 결정\n원래\n' > "$LIB_DIR/decisions/demo/process/other.md"
-  policy_fixture
-  printf '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"sed -i x decisions/demo/process/mine.md"}}]}}\n' > "$TEST_HOME/t.jsonl"
-  echo '내가 고침' >> "$LIB_DIR/decisions/demo/process/mine.md"
-  policy_stop_with "$TEST_HOME/t.jsonl" | jq -e '.decision == "block"'
-  policy_entry "$LIB_DIR/decisions/demo/process/other.md"
-  policy_stop_with "$TEST_HOME/t.jsonl" | jq -e '.decision == "block"'
-  policy_entry "$LIB_DIR/decisions/demo/process/other.md"
-  policy_stop_with "$TEST_HOME/t.jsonl" | jq -e 'has("decision") | not'
+@test "TC-128: unreadable transcript owns nothing" {
+  [ -z "$(policy_mine "$TEST_HOME/missing.jsonl" "$LIB_DIR/GUIDE.md")" ]
 }
 
-@test "TC-118: install update register policy and async usage exactly once and uninstall removes them" {
+@test "TC-118: install update register async usage once, drop the policy check, uninstall removes them" {
   [ -f "$SOURCE_DIR/hooks/library-usage-log.sh" ] || printf '#!/bin/bash\nexit 0\n' > "$SOURCE_DIR/hooks/library-usage-log.sh"
+  # 예전 설치본: 정책 이력 검사 훅이 등록돼 있다
+  mkdir -p "$CLAUDE_DIR/hooks"
+  printf '#!/bin/bash\nexit 0\n' > "$CLAUDE_DIR/hooks/policy-changelog-check.sh"
+  jq --arg c "$CLAUDE_DIR/hooks/policy-changelog-check.sh" '.hooks.SessionStart += [{hooks:[{type:"command",command:$c}]}] | .hooks.Stop += [{hooks:[{type:"command",command:$c}]}]' "$SETTINGS" > "$TEST_HOME/s" && mv "$TEST_HOME/s" "$SETTINGS"
   install_with_input 1 --profile maintainer
   install_with_input 1 --profile maintainer
   bash "$SOURCE_DIR/update.sh"
   bash "$SOURCE_DIR/update.sh"
-  [ -x "$CLAUDE_DIR/hooks/policy-changelog-check.sh" ]
+  [ ! -e "$CLAUDE_DIR/hooks/policy-changelog-check.sh" ]
   [ -f "$CLAUDE_DIR/hooks/policy-changelog.py" ]
   [ -x "$CLAUDE_DIR/hooks/library-usage-log.sh" ]
-  jq -e '
-    ([.hooks.SessionStart[].hooks[] | select(.command | endswith("policy-changelog-check.sh"))] | length == 1) and
-    ([.hooks.Stop[].hooks[] | select(.command | endswith("policy-changelog-check.sh"))] | length == 1) and
-    ([.hooks.Stop[].hooks[] | select(.command | endswith("library-usage-log.sh"))] | length == 1 and .[0].async == true and .[0].timeout == 30)
-  ' "$SETTINGS"
+  ! grep -q 'policy-changelog-check' "$SETTINGS"
+  jq -e '[.hooks.Stop[].hooks[] | select(.command | endswith("library-usage-log.sh"))] | length == 1 and .[0].async == true and .[0].timeout == 30' "$SETTINGS"
   sed 's|</dev/tty||g' "$SOURCE_DIR/uninstall.sh" > "$TEST_HOME/uninstall.sh"
   bash "$TEST_HOME/uninstall.sh" "$TEST_HOME" <<< n
-  [ ! -e "$CLAUDE_DIR/hooks/policy-changelog-check.sh" ]
   [ ! -e "$CLAUDE_DIR/hooks/policy-changelog.py" ]
   [ ! -e "$CLAUDE_DIR/hooks/library-usage-log.sh" ]
   ! grep -qE 'policy-changelog|library-usage-log' "$SETTINGS"
@@ -1566,20 +1431,6 @@ policy_stop_with() {
   grep -qF -- "$(grep '· process:update.sh ·' "$LIB_DIR/GUIDE.md.test-copy")" "$LIB_DIR/GUIDE.md"
 }
 
-@test "TC-120: history examples in code fences or later sections do not satisfy the gate" {
-  policy_fixture
-  cat >> "$LIB_DIR/GUIDE.md" <<'DOC'
-```markdown
-## 변경 이력
-- 2026-10-05 · codex · 예시 · 이유: 예시 · 근거: session:example
-```
-## 변경 이력
-## 다른 섹션
-- 2026-10-05 · codex · 예시 · 이유: 예시 · 근거: session:example
-DOC
-  policy_event Stop | jq -e '.decision == "block"'
-}
-
 @test "profile defaults user and switches maintainer back to user" {
   install_with_input 1
   jq -e '.env.LIBRARY_USAGE_LOG == "aggregate"' "$SETTINGS"
@@ -1588,10 +1439,11 @@ DOC
   bash "$SOURCE_DIR/update.sh" --profile maintainer
   [ "$(cat "$CLAUDE_DIR/hooks/.learnings-profile")" = maintainer ]
   jq -e '.env.LIBRARY_USAGE_LOG == "full"' "$SETTINGS"
-  grep -q 'policy-changelog-check' "$SETTINGS"
+  ! grep -q 'policy-changelog-check' "$SETTINGS"
+  [ -f "$CLAUDE_DIR/hooks/policy-changelog.py" ]
   bash "$SOURCE_DIR/update.sh" --profile user
   [ ! -f "$CLAUDE_DIR/hooks/.learnings-profile" ]
-  [ ! -f "$CLAUDE_DIR/hooks/policy-changelog-check.sh" ]
+  [ ! -f "$CLAUDE_DIR/hooks/policy-changelog.py" ]
   ! grep -q 'policy-changelog-check' "$SETTINGS"
   jq -e '.env.LIBRARY_USAGE_LOG == "aggregate"' "$SETTINGS"
 }
