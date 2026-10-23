@@ -1,21 +1,8 @@
-# ai-bouncer 레포 설정 — 이 레포에서 "작업 끝"이라고 하려면 통과해야 할 검사를 적는다.
-# 단계 순서(구현 → 검증 → 마무리)와 기본 규칙은 전역 엔진에 있다. 여기엔 이 레포만 다른 것만 적는다.
-# 적을 수 있는 키: docs/SCHEMA.md
+# ai-bouncer 레포 설정 — 기본값과 같은 형식. 모드·단계를 이름 단위로 교체하거나 추가한다.
+#   stages.<단계>.prompt  할 일 / run  통과 조건(exit 0) / items  세부 항목
+#   stages.<단계>.choosable  항목을 고르는 방식: ask 사용자에게 묻는다 / auto AI 가 고른다 / all 전부(기본)
+# 형식: docs/SCHEMA.md
 
-version: 1
 stages:
   verify:
-    steps:
-      - label: "검증 보고"
-        inject: |
-          [verify] 검증 단계다. 추측 금지 — 실제로 실행해서 확인한다.
-            1. `bouncer run 'verify/설치 테스트'` 와 `bouncer run 'verify/파이썬 테스트'` 를 실행한다.
-            2. 실패한 것을 통과로 보고하지 않는다.
-      - label: "설치 테스트"
-        run: "bats tests/install.bats"
-        timeout: 900
-        blocking: true
-      - label: "파이썬 테스트"
-        run: "cd mcp-server && uv run -q --extra postgres --with pytest pytest -q"
-        timeout: 900
-        blocking: true
+    run: ["bats tests/install.bats", "cd mcp-server && uv run -q --extra postgres --with pytest pytest -q"]
