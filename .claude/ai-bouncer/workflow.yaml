@@ -5,11 +5,18 @@
 
 stages:
   verify:
-    # 검사는 전부 고르는 항목이다 (verify 는 시작할 때 고른다). 단계 run 에 넣으면 매번 강제로 돈다.
+    # 검사는 전부 고르는 항목이다 (verify 는 시작할 때 고른다).
+    # 모델이 prompt 대로 bouncer record 로 직접 돌리고, run 은 bouncer passed 로 결과만 본다.
     items:
       install:
         label: "설치 테스트 (bats)"
-        run: ["bats tests/install.bats"]
+        prompt: |
+          직접 돌린다: bouncer record install 'bats tests/install.bats'
+          hook 은 다시 돌리지 않는다. 결과가 마지막 수정보다 새것이고 통과했는지만 본다.
+        run: bouncer passed install
       mcp:
         label: "MCP 서버 pytest"
-        run: ["cd mcp-server && uv run -q --extra postgres --with pytest pytest -q"]
+        prompt: |
+          직접 돌린다: bouncer record mcp 'cd mcp-server && uv run -q --extra postgres --with pytest pytest -q'
+          hook 은 다시 돌리지 않는다. 결과가 마지막 수정보다 새것이고 통과했는지만 본다.
+        run: bouncer passed mcp
