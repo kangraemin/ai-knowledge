@@ -5,4 +5,11 @@
 
 stages:
   verify:
-    run: ["bats tests/install.bats", "cd mcp-server && uv run -q --extra postgres --with pytest pytest -q"]
+    # 검사는 전부 고르는 항목이다 (verify 는 시작할 때 고른다). 단계 run 에 넣으면 매번 강제로 돈다.
+    items:
+      install:
+        label: "설치 테스트 (bats)"
+        run: ["bats tests/install.bats"]
+      mcp:
+        label: "MCP 서버 pytest"
+        run: ["cd mcp-server && uv run -q --extra postgres --with pytest pytest -q"]
