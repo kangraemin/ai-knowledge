@@ -73,3 +73,20 @@ def test_decision_title_comes_from_frontmatter():
 def test_decision_lead_without_heading():
     import server
     assert server._decision_lead({"body": "- 첫 줄\n- 둘째 줄"}) == "- 첫 줄"
+
+
+def test_related_decisions_use_local_folder_name(monkeypatch, tmp_path):
+    """원격 이름이 달라도 로컬 폴더 이름의 결정을 찾는다."""
+    import subprocess
+    import server
+    root = tmp_path / "lib"
+    monkeypatch.setattr(server, "LIBRARY_ROOT", root)
+    write(root, "contests", "process", "board-update", "현황판·리스트 갱신 방법 전체", "전 계정에서 갖고 오는 절차.",
+          description="현황판·리스트 다시 갱신", tags="현황판, 리스트, 갱신")
+    repo = tmp_path / "contests"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=repo, check=True)
+    subprocess.run(["git", "remote", "add", "origin", "git@github.com:me/other-remote.git"], cwd=repo, check=True)
+    monkeypatch.chdir(repo)
+    assert server._current_repos() == {"other-remote", "contests"}
+    assert any("board-update" in e["path"] for e in server._related_decisions("현황판 리스트 다시 갱신"))

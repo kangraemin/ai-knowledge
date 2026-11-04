@@ -145,3 +145,7 @@ def test_long_instruction_is_kept_truncated():
     from kb.instructions import extract
     row = extract(_line(type="user", origin={"kind": "human"}, message={"content": "가" * 3000}) + b"\n")
     assert len(row["text"]) == 2000
+
+
+def test_same_word_terms():
+    assert "스샷" in instructions._terms("화면 스크린샷 보내", ["스샷말고 동영상으로", "화면 보내"])

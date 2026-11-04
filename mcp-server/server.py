@@ -250,10 +250,20 @@ def _current_repo() -> str:
     return ""
 
 
+def _current_repos() -> set[str]:
+    """결정 폴더 이름은 원격 이름일 수도, 로컬 폴더 이름일 수도 있다(defense-game ↔ forge-survivor). 둘 다 본다."""
+    import subprocess
+    try:
+        top = subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, timeout=2).stdout.strip()
+    except Exception:
+        top = ""
+    return {_current_repo(), top.rstrip("/").rsplit("/", 1)[-1]} - {""}
+
+
 def _related_decisions(query: str, k=3) -> list[dict]:
     """공통(_global)과 현재 레포 결정만 본다. 다른 레포 결정은 단어만 겹쳐도 엉뚱하게 붙는다."""
     from kb.relevance import Corpus, DEFAULT_MIN_SCORE
-    scope = {"_global", _current_repo()} - {""}
+    scope = {"_global"} | _current_repos()
     entries = [e for e in _decision_entries("")
                if e["status"] != "deprecated" and e["category"] in DECISION_CATEGORIES and e["repo"] in scope]
     if not entries:
@@ -444,7 +454,7 @@ def decision_search(query: str, repo: str = "") -> str:
     entries = [e for e in _decision_entries(repo) if e["status"] != "deprecated"]
     if not entries:
         return f"'{query}' 관련 결정사항 없음."
-    near = {"_global", _current_repo()} - {""}
+    near = {"_global"} | _current_repos()
     scored = [(score * (1.5 if e["repo"] in near else 1), e)
               for score, e in zip(Corpus(_decision_docs(entries)).scores(query), entries)]
     scored = sorted((s for s in scored if s[0] > 0), key=lambda s: (-s[0], s[1]["path"]))

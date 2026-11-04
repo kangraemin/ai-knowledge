@@ -189,12 +189,19 @@ def current_project():
     return re.sub(r"[^A-Za-z0-9]", "-", os.getcwd())
 
 
+# 사용자가 줄여 쓰거나 한글로 쓰는 말. 질의에 한쪽만 있어도 기록을 찾는다.
+_SAME = (("스크린샷", "스샷"), ("codex", "코덱스"), ("클로드", "claude"))
+
+
 def _terms(query, texts):
     """붙여 쓴 구어체는 기록에 나오는 낱말 조각으로 나눈다."""
     from .search import query_terms
     vocabulary = None
     out = []
     for term in query_terms(query):
+        for a, b in _SAME:
+            if a in term or b in term:
+                out.append(a if b in term else b)
         if term.isascii() or len(term) < 4 or any(term in t for t in texts):
             out.append(term)
             continue
