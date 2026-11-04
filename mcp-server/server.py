@@ -12,6 +12,9 @@ INSTRUCTIONS = (
     "ALWAYS make library_search() your FIRST tool call whenever the user asks you to do, check or decide "
     "anything, chores included (updating a board or list, moving data, deploying, submitting, posting, "
     "account or login problems), as well as technical questions and implementation. Skip it only for small talk. "
+    "This applies to EVERY new user message, not only the first one in a session: message 2 and message 50 "
+    "get the same search. A correction, a short follow-up or a new topic mid-conversation is a new message. "
+    "An earlier search covered only the earlier message, so never reuse it instead of searching again. "
     "Also call it before you say something is blocked, impossible, must wait or will happen later, "
     "and before you repeat work done earlier. "
     "Your memory, a summary, an earlier plan or a scheduled job is NOT a reason to skip it: those go stale, "
@@ -52,6 +55,9 @@ class _ToolRegistry:
 
 
 mcp = _ToolRegistry()
+
+# 안내문은 세션 첫머리에만 있어 대화가 길어지면 잊힌다. 검색 결과 끝마다 다시 알린다.
+_SEARCH_AGAIN = "\n\n(이 결과는 방금 말에만 해당한다. 사용자가 새로 말하면 짧은 말·정정·다른 주제도 그 말 그대로 library_search를 다시 부른다. 앞선 검색과 기억으로 대신하지 않는다)"
 
 # --- In-memory index (lazy built) ---
 
@@ -167,7 +173,8 @@ def library_search(query: str) -> str:
     """
     Search the knowledge library and the decisions agreed with the user.
     Call this first for any request, chores included, and before saying something
-    is blocked or must wait. Contains: how the user wants recurring work done,
+    is blocked or must wait. Call it again for every new user message, however long
+    the conversation already is: an earlier search does not cover a new message. Contains: how the user wants recurring work done,
     backtest results, API/framework gotchas, debugging solutions, tool
     configurations, architecture decisions, proven patterns.
 
@@ -177,7 +184,7 @@ def library_search(query: str) -> str:
     """
     from kb import api
     if api.postgres():
-        return api.search_text(query)
+        return api.search_text(query) + _SEARCH_AGAIN
     start = time.monotonic()
     matches = _search(query)
     # 1위 점수의 40% 미만인 꼬리는 뺀다(2026-10 검색 1082건: 6·7위의 40~46%가 여기 해당, 결과 중간값 3.5KB).
@@ -191,7 +198,7 @@ def library_search(query: str) -> str:
     from kb.instructions import format_rows, lookup
     said = lookup(query)
     if not matches and not decisions and not said:
-        return f"'{query}' 관련 라이브러리 항목·결정사항 없음."
+        return f"'{query}' 관련 라이브러리 항목·결정사항 없음." + _SEARCH_AGAIN
 
     from kb.search import format_results
     out = format_results(matches, token_budget=10000) if matches else f"'{query}' 관련 라이브러리 항목 없음."
@@ -201,7 +208,7 @@ def library_search(query: str) -> str:
             for e in decisions)
     if said:
         out += "\n\n## 사용자가 이 프로젝트에서 전에 직접 한 말 (시킨 방식이면 그대로 한다)\n" + format_rows(said)
-    return out
+    return out + _SEARCH_AGAIN
 
 
 @mcp.tool()

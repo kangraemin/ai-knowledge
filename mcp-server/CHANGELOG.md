@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.5.11
+- 안내문·도구 설명에 새 말마다 다시 검색하라고 적고, `library_search` 결과 끝에도 같은 말을 붙였다.
+
 ## 0.5.10
 - `library_search` 결과의 관련 결정 머리말을 "답하기 전에 decision_read로 먼저 연다"로 바꿨다.
 

@@ -65,7 +65,7 @@ def test_file_backend_search_no_body_and_legacy_tools(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(server, "LIBRARY_ROOT", root)
     monkeypatch.setattr(server, "_index_cache", None)
-    result = server.library_search("apples")
+    result = server.library_search("apples").removesuffix(server._SEARCH_AGAIN)
     assert "library/topic/apple.md · 제목 · apples" == result
     assert "본문비공개" not in result
     assert "본문비공개" in server.library_read("library/topic/apple.md")
@@ -175,5 +175,5 @@ def test_library_search_drops_weak_tail(monkeypatch):
     monkeypatch.setattr(server, "_search", lambda q: [dict(r) for r in rows])
     monkeypatch.setattr(server, "_related_decisions", lambda q: [])
     monkeypatch.setattr("kb.activity.search_event", lambda *a, **k: None)
-    result = server.library_search("q")
+    result = server.library_search("q").removesuffix(server._SEARCH_AGAIN)
     assert [line.split(" · ")[0] for line in result.splitlines()] == [f"library/t/{i}.md" for i in range(4)]

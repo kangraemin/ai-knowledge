@@ -107,3 +107,15 @@ def test_search_guidance_asks_for_verbatim_message():
 
 def test_search_result_tells_to_open_decision_before_answering(library):
     assert "답하기 전에 decision_read" in library.library_search("현황판 리스트 다시 갱신")
+
+
+def test_guidance_asks_to_search_on_every_new_message():
+    import server
+    assert "EVERY new user message" in server.INSTRUCTIONS
+    assert "every new user message" in server.library_search.__doc__
+
+
+def test_every_search_result_reminds_to_search_again(library):
+    assert library.library_search("찾을 게 전혀 없는 말 쿼크").endswith(library._SEARCH_AGAIN)
+    found = library.library_search("현황판 리스트 다시 갱신")
+    assert "board-update" in found and found.endswith(library._SEARCH_AGAIN)
