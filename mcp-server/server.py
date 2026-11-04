@@ -16,13 +16,14 @@ INSTRUCTIONS = (
     "and before you repeat work done earlier. "
     "Your memory, a summary, an earlier plan or a scheduled job is NOT a reason to skip it: those go stale, "
     "and the user's procedures and instructions live in this library. "
-    "Search with the user's own words or keywords from them. "
+    "Put the user's message into the query verbatim. Do not shorten it to keywords: short words get dropped "
+    "and the right rule falls out of the results. "
     "This library contains past experiments, gotchas, proven solutions and how the user wants recurring work done — "
     "ignoring it risks repeating known mistakes and making the user say the same thing again. "
     "library_search also returns matching decisions (rules already agreed with the user) — follow them. "
     "When a result covers what was asked, open it with decision_read() or library_read() and follow it to the end "
     "instead of improvising or asking. "
-    "Before telling the user something is not in the library, also run decision_search() with the same keywords. "
+    "Before telling the user something is not in the library, also run decision_search() with the same query. "
     "If results found: prefix response with '📚 library 참조: [topic]' and follow stored guidance. "
     "If no results: proceed normally without mentioning the search."
 )
@@ -171,7 +172,8 @@ def library_search(query: str) -> str:
     configurations, architecture decisions, proven patterns.
 
     Args:
-        query: the user's own words or keywords (e.g. "현황판 다시 갱신", "hook timing", "bb rsi crypto")
+        query: the user's message verbatim, not shortened to keywords
+               (e.g. "역 검색은 역 이름을 끝까지 다 쳐야 나오게 하면 되지?", "hook timing")
     """
     from kb import api
     if api.postgres():

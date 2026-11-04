@@ -97,3 +97,9 @@ def test_related_decisions_show_five(library):
     for i in range(7):
         write(root, "contests", "process", f"board-{i}", f"현황판 규칙 {i}", "현황판 내용")
     assert len(library._related_decisions("현황판 규칙")) == 5
+
+
+def test_search_guidance_asks_for_verbatim_message():
+    import server
+    assert "verbatim" in server.INSTRUCTIONS
+    assert "verbatim" in server.library_search.__doc__
