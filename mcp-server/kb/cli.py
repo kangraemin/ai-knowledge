@@ -87,6 +87,7 @@ def parser():
     sub = p.add_subparsers(dest="command", required=True)
     sub.add_parser("migrate")
     sub.add_parser("doctor")
+    sub.add_parser("instructions-sync")
     sub.add_parser("duplicates").add_argument("path")
     stats_parser = sub.add_parser("stats")
     stats_parser.add_argument("--days", type=int, default=30)
@@ -172,6 +173,13 @@ def main(argv=None):
                 if args.format == "json"
                 else format_results(rows, args.budget)
             )
+        elif args.command == "instructions-sync":
+            from .instructions import _rows, sync
+
+            # 검색은 호출마다 1초만 모은다. 처음 전부 모을 때는 이 명령으로 끝까지 돈다.
+            while not sync(budget=30):
+                time.sleep(1)  # 다른 서버가 모으는 중이면 끝나길 기다린다
+            result = f"사용자 발화 {len(_rows())}건"
         elif args.command == "decisions":
             import server
 

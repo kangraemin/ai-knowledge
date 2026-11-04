@@ -6,9 +6,13 @@
 update_library_mcp() {
   local branch="$1" spec="$2" mode="${3:-update}"
   local sf tmp snapshot found=false
+  # CLAUDE_CONFIG_DIR 을 쓰면 Claude Code 는 그 폴더의 .claude.json 만 읽는다.
+  # 여기를 빼먹으면 alwaysLoad 가 안 걸려 위키 도구가 숨고, 세션이 검색을 안 부른다.
+  local -a targets=("$HOME/.claude/settings.json" "$HOME/.claude.json")
+  [ -n "${CLAUDE_CONFIG_DIR:-}" ] && targets+=("$CLAUDE_CONFIG_DIR/.claude.json")
   command -v jq >/dev/null 2>&1 || { echo "브랜치 설정에는 jq가 필요합니다." >&2; return 1; }
   # 어느 한쪽에만 등록되어 있으면 다른 파일에 중복 등록하지 않는다.
-  for sf in "$HOME/.claude/settings.json" "$HOME/.claude.json"; do
+  for sf in "${targets[@]}"; do
     [ -f "$sf" ] || continue
     if ! jq -e -s 'length == 1 and (.[0] | type == "object")' "$sf" >/dev/null 2>&1; then
       echo "경고: $sf JSON 오류 — MCP 변경 중단" >&2
@@ -18,7 +22,7 @@ update_library_mcp() {
       found=true
     fi
   done
-  for sf in "$HOME/.claude/settings.json" "$HOME/.claude.json"; do
+  for sf in "${targets[@]}"; do
     [ -f "$sf" ] || continue
     if ! jq -e '.mcpServers["claude-library"] | type == "object"' "$sf" >/dev/null; then
       # 등록이 전혀 없을 때만 기존 settings.json 등록 동작을 유지한다.

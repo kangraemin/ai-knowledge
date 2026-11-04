@@ -10,7 +10,7 @@ setup() {
   export SETTINGS="$CLAUDE_DIR/settings.json"
   export INSTALL_SH="$(cd "$(dirname "$BATS_TEST_FILENAME")/.." && pwd)/install.sh"
 
-  unset LEARNINGS_PROFILE LIBRARY_USAGE_LOG LEARNINGS_BRANCH LEARNINGS_AUTO_UPDATE LIBRARY_KB_CMD LIBRARY_AUTOINJECT KB_SLEEP KB_FAIL
+  unset CLAUDE_CONFIG_DIR LEARNINGS_PROFILE LIBRARY_USAGE_LOG LEARNINGS_BRANCH LEARNINGS_AUTO_UPDATE LIBRARY_KB_CMD LIBRARY_AUTOINJECT KB_SLEEP KB_FAIL
   export ORIG_TEST_PATH="$PATH"
   # 테스트가 실제 uvx 로 PyPI 를 받지 않게 한다. 미리 받기 동작은 전용 테스트에서 stub 으로 검증한다.
   export LEARNINGS_KB_WARM=0
@@ -1525,6 +1525,16 @@ PY
     jq -e '.custom == 42 and .mcpServers.other.command == "keep" and .mcpServers["claude-library"].alwaysLoad == true and .mcpServers["claude-library"].env.CUSTOM == "yes" and .mcpServers["claude-library"].custom == true' "$file"
     jq -e '.mcpServers["claude-library"].command == "old"' "$file.bak"
   done
+}
+
+@test "CLAUDE_CONFIG_DIR registration also gets alwaysLoad" {
+  export CLAUDE_CONFIG_DIR="$TEST_HOME/account"
+  mkdir -p "$CLAUDE_CONFIG_DIR"
+  printf '%s\n' '{"mcpServers":{"claude-library":{"command":"old","env":{"CUSTOM":"yes"}}},"keep":1}' > "$CLAUDE_CONFIG_DIR/.claude.json"
+  source "$SOURCE_DIR/scripts/update-check.sh"
+  update_library_mcp main claude-library-mcp
+  jq -e '.keep == 1 and .mcpServers["claude-library"].alwaysLoad == true and .mcpServers["claude-library"].command == "uvx" and .mcpServers["claude-library"].env.CUSTOM == "yes"' "$CLAUDE_CONFIG_DIR/.claude.json"
+  unset CLAUDE_CONFIG_DIR
 }
 
 @test "main kb spec pins packaged version and falls back without pyproject" {

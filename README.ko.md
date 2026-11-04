@@ -131,6 +131,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/kangraemin/learnings-for-cla
 | 도구 | 설명 |
 |------|------|
 | `library_search(query)` | 키워드로 라이브러리 검색 |
+| `instruction_search(query, all_projects)` | 사용자가 지난 세션에서 직접 입력한 말 전체를 검색. 세션 기록에서 읽어 로컬에만 두고 커밋하지 않음. `LIBRARY_INSTRUCTIONS=off`로 끔 |
 | `library_read(path)` | 특정 라이브러리 파일 읽기 |
 | `library_list()` | LIBRARY.md 전체 인덱스 조회 |
 

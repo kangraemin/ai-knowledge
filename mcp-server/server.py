@@ -9,12 +9,19 @@ import time
 from pathlib import Path
 
 INSTRUCTIONS = (
-    "ALWAYS call library_search() before answering technical questions, "
-    "suggesting approaches, or starting implementation. "
-    "Search for relevant keywords from the user's question. "
-    "This library contains past experiments, gotchas, and proven solutions — "
-    "ignoring it risks repeating known mistakes. "
+    "ALWAYS make library_search() your FIRST tool call whenever the user asks you to do, check or decide "
+    "anything, chores included (updating a board or list, moving data, deploying, submitting, posting, "
+    "account or login problems), as well as technical questions and implementation. Skip it only for small talk. "
+    "Also call it before you say something is blocked, impossible, must wait or will happen later, "
+    "and before you repeat work done earlier. "
+    "Your memory, a summary, an earlier plan or a scheduled job is NOT a reason to skip it: those go stale, "
+    "and the user's procedures and instructions live in this library. "
+    "Search with the user's own words or keywords from them. "
+    "This library contains past experiments, gotchas, proven solutions and how the user wants recurring work done — "
+    "ignoring it risks repeating known mistakes and making the user say the same thing again. "
     "library_search also returns matching decisions (rules already agreed with the user) — follow them. "
+    "When a result covers what was asked, open it with decision_read() or library_read() and follow it to the end "
+    "instead of improvising or asking. "
     "Before telling the user something is not in the library, also run decision_search() with the same keywords. "
     "If results found: prefix response with '📚 library 참조: [topic]' and follow stored guidance. "
     "If no results: proceed normally without mentioning the search."
@@ -63,11 +70,6 @@ def _strip_frontmatter(text: str) -> str:
         if end != -1:
             return text[end + 3:].strip()
     return text
-
-
-def _word_match(term: str, text: str) -> bool:
-    """Word boundary match — 'ml' won't match 'html'."""
-    return bool(re.search(r'(?<![a-z가-힣0-9])' + re.escape(term) + r'(?![a-z가-힣0-9])', text))
 
 
 def _build_index() -> list[dict]:
@@ -162,12 +164,14 @@ def _read_topic(rel_path: str) -> str:
 @mcp.tool()
 def library_search(query: str) -> str:
     """
-    Search the knowledge library for past experiments, gotchas, and solutions.
-    Contains: backtest results, API/framework gotchas, debugging solutions,
-    tool configurations, architecture decisions, proven patterns.
+    Search the knowledge library and the decisions agreed with the user.
+    Call this first for any request, chores included, and before saying something
+    is blocked or must wait. Contains: how the user wants recurring work done,
+    backtest results, API/framework gotchas, debugging solutions, tool
+    configurations, architecture decisions, proven patterns.
 
     Args:
-        query: search keywords (e.g. "hook timing", "spring test", "bb rsi crypto")
+        query: the user's own words or keywords (e.g. "현황판 다시 갱신", "hook timing", "bb rsi crypto")
     """
     from kb import api
     if api.postgres():
@@ -182,25 +186,53 @@ def library_search(query: str) -> str:
 
     # 모델은 지식만 검색하고 결정사항(decision_search)은 잘 부르지 않는다. 함께 보여준다.
     decisions = _related_decisions(query)
-    if not matches and not decisions:
+    from kb.instructions import format_rows, lookup
+    said = lookup(query)
+    if not matches and not decisions and not said:
         return f"'{query}' 관련 라이브러리 항목·결정사항 없음."
 
     from kb.search import format_results
     out = format_results(matches, token_budget=10000) if matches else f"'{query}' 관련 라이브러리 항목 없음."
     if decisions:
-        out += "\n\n## 관련 결정사항 (이미 정한 규칙 — 따른다)\n" + "\n".join(
-            f"- **{_decision_title(e)}** `{e['path']}`" + (f"\n  {d}" if (d := _decision_outcome(e) or _decision_lead(e)) else "")
+        out += "\n\n## 관련 결정사항 (이미 정한 규칙 — 따른다. 요청에 맞으면 decision_read로 전문을 연다)\n" + "\n".join(
+            f"- **{_decision_title(e)}** `{e['path']}`" + (f"\n  {d}" if (d := _decision_summary(e)) else "")
             for e in decisions)
+    if said:
+        out += "\n\n## 사용자가 이 프로젝트에서 전에 직접 한 말 (시킨 방식이면 그대로 한다)\n" + format_rows(said)
     return out
 
 
+@mcp.tool()
+def instruction_search(query: str, all_projects: bool = False) -> str:
+    """
+    사용자가 세션에서 직접 한 말 전체에서 찾는다. 전에 어떻게 하라고 시켰는지 확인할 때 쓴다.
+    library_search 도 상위 몇 건을 함께 보여 준다. 더 찾을 때 이 도구를 쓴다.
+
+    Args:
+        query: 사용자 원문 또는 키워드
+        all_projects: true 면 다른 프로젝트 세션까지 찾는다
+    """
+    from kb.instructions import enabled, format_rows, lookup
+    if not enabled():
+        return "사용자 발화 검색이 꺼져 있다 (LIBRARY_INSTRUCTIONS=off)."
+    rows = lookup(query, k=10, all_projects=all_projects)
+    return format_rows(rows) if rows else f"'{query}' 관련 사용자 발화 없음."
+
+
+def _decision_summary(entry, limit=400) -> str:
+    return (_decision_outcome(entry) or _decision_lead(entry))[:limit]
+
+
+def _decision_docs(entries) -> list[dict]:
+    """결정 검색도 지식 검색과 같은 필드 가중 점수를 쓴다."""
+    return [{"title": _decision_title(e), "description": e["description"], "tags": e["tags"],
+             "path": e["path"], "body": e["body"]} for e in entries]
+
+
 def _decision_lead(entry) -> str:
-    """Decision Outcome 절이 없는 결정은 제목 다음 첫 문단 줄을 요약으로 쓴다."""
-    seen_title = False
+    """Decision Outcome 절이 없는 결정은 첫 문단 줄을 요약으로 쓴다. # 제목이 없는 문서도 있다."""
     for line in entry["body"].splitlines():
-        if line.startswith("# "):
-            seen_title = True
-        elif seen_title and line.strip() and not line.startswith("#"):
+        if line.strip() and not line.startswith("#"):
             return line.strip()[:400]
     return ""
 
@@ -218,7 +250,7 @@ def _current_repo() -> str:
     return ""
 
 
-def _related_decisions(query: str, k=2) -> list[dict]:
+def _related_decisions(query: str, k=3) -> list[dict]:
     """공통(_global)과 현재 레포 결정만 본다. 다른 레포 결정은 단어만 겹쳐도 엉뚱하게 붙는다."""
     from kb.relevance import Corpus, DEFAULT_MIN_SCORE
     scope = {"_global", _current_repo()} - {""}
@@ -226,8 +258,7 @@ def _related_decisions(query: str, k=2) -> list[dict]:
                if e["status"] != "deprecated" and e["category"] in DECISION_CATEGORIES and e["repo"] in scope]
     if not entries:
         return []
-    docs = [{"title": _decision_title(e), "body": e["body"], "path": e["path"]} for e in entries]
-    scored = sorted(zip(Corpus(docs).scores(query), range(len(entries))), reverse=True)
+    scored = sorted(zip(Corpus(_decision_docs(entries)).scores(query), range(len(entries))), reverse=True)
     return [entries[i] for score, i in scored[:k] if score >= DEFAULT_MIN_SCORE["files"]]
 
 
@@ -322,9 +353,12 @@ def _decision_entries(repo: str = "") -> list[dict]:
             "repo": meta.get("repo", parts[1]),
             "category": meta.get("category", parts[2]),
             "name": meta.get("name", md.stem),
+            "title": meta.get("title", ""),
             "status": meta.get("status", "stable"),  # OKF §5.4: draft|stable|deprecated
             "supersedes": meta.get("supersedes", ""),
             "superseded_by": meta.get("superseded_by", ""),
+            "description": meta.get("description", ""),
+            "tags": meta.get("tags", "") + " " + meta.get("triggers", ""),
             "date": meta.get("date", ""),
             "body": _strip_frontmatter(text),
         })
@@ -332,9 +366,11 @@ def _decision_entries(repo: str = "") -> list[dict]:
 
 
 def _decision_title(entry: dict) -> str:
-    """본문 첫 # 헤딩을 제목으로."""
+    """프론트매터 title, 없으면 본문 첫 # 헤딩. 틀에서 남은 '# 결정' 같은 헤딩은 제목이 아니다."""
+    if entry.get("title"):
+        return entry["title"]
     for line in entry["body"].splitlines():
-        if line.startswith("# "):
+        if line.startswith("# ") and line[2:].strip() not in ("결정", "Decision"):
             return line[2:].strip()
     return entry["name"]
 
@@ -390,44 +426,42 @@ def decision_list(repo: str) -> str:
 @mcp.tool()
 def decision_search(query: str, repo: str = "") -> str:
     """
-    결정사항(Decision History)을 검색한다. 결정 내용·이유로 찾는다.
-    지식이 아니라 "우리가 이렇게 하기로 정한 것"을 찾을 때 쓴다.
+    결정사항(Decision History)을 검색한다. 결정 내용·이유·갱신 절차로 찾는다.
+    "우리가 이렇게 하기로 정한 것", 사용자가 시킨 방식을 찾을 때 쓴다.
 
     Args:
-        query: 검색 키워드
-        repo: 특정 레포로 한정 (생략하면 전체)
+        query: 사용자 원문 또는 검색 키워드
+        repo: 특정 레포로 한정 (생략하면 전체. 지금 레포와 공통 결정을 앞에 둔다)
     """
     from kb import api
     if api.postgres():
         return api.search_text(query, kind="decision", repo=repo)
-    terms = [t for t in re.split(r"[\s,]+", query.lower()) if t]
-    if not terms:
+    from kb.relevance import Corpus
+    from kb.search import query_terms
+    if not query_terms(query):
         return "검색어 없음."
 
-    scored = []
-    for e in _decision_entries(repo):
-        if e["status"] == "deprecated":
-            continue
-        hay = (e["name"] + " " + e["body"]).lower()
-        score = sum(1 for t in terms if _word_match(t, hay))
-        if score:
-            if e["status"] == "deprecated":
-                score -= 0.5
-            scored.append((score, e))
-
+    entries = [e for e in _decision_entries(repo) if e["status"] != "deprecated"]
+    if not entries:
+        return f"'{query}' 관련 결정사항 없음."
+    near = {"_global", _current_repo()} - {""}
+    scored = [(score * (1.5 if e["repo"] in near else 1), e)
+              for score, e in zip(Corpus(_decision_docs(entries)).scores(query), entries)]
+    scored = sorted((s for s in scored if s[0] > 0), key=lambda s: (-s[0], s[1]["path"]))
     if not scored:
         return f"'{query}' 관련 결정사항 없음."
 
-    scored.sort(key=lambda x: -x[0])
+    # 1위 점수의 40% 미만은 단어 한두 개가 우연히 겹친 꼬리다(library_search와 같은 기준).
     out = []
-    for _, e in scored[:8]:
+    for score, e in [s for s in scored[:8] if s[0] >= scored[0][0] * 0.4]:
         mark = "" if e["status"] == "stable" else f" [{e['status']}]"
         out.append(f"## {e['repo']}/{e['category']}/{e['name']}{mark}")
         out.append(f"> {_decision_title(e)}")
-        d = _decision_outcome(e)
+        d = _decision_summary(e)
         if d:
             out.append(d)
         out.append(f"`{e['path']}`\n")
+    out.append("요청에 맞는 결정은 decision_read로 전문을 열고 그대로 한다.")
     return "\n".join(out)
 
 

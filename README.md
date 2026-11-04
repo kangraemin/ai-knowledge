@@ -131,6 +131,7 @@ The installer configures this automatically in `~/.claude/settings.json`:
 | Tool | Description |
 |------|-------------|
 | `library_search(query)` | Search library by keywords |
+| `instruction_search(query, all_projects)` | Search everything the user typed in past sessions. Local only, read from session transcripts, never committed. `LIBRARY_INSTRUCTIONS=off` disables it |
 | `library_read(path)` | Read a specific library file |
 | `library_list()` | Show full LIBRARY.md index |
 

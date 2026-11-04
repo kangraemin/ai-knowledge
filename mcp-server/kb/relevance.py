@@ -167,14 +167,41 @@ class Corpus:
         return [{"core_matches": len(rare & meta), "query_terms": len(terms)}
                 for meta in self.metadata]
 
+    def _split_compound(self, term):
+        """띄어 쓰지 않은 구어체("다시갱신해야하는거아님")를 어휘에 있는 조각으로 나눈다.
+
+        왼쪽부터 가장 긴 조각을 고른다.
+        """
+        pieces, at = [], 0
+        while at < len(term) - 1:
+            for end in range(len(term), at + 1, -1):
+                if term[at:end] in self.postings:
+                    pieces.append(term[at:end])
+                    at = end
+                    break
+            else:
+                at += 1
+        return pieces
+
+    def _expanded(self, terms):
+        out = []
+        for term in terms:
+            # 문서에 그 모양 그대로 없는 긴 한글 단어("우편접수" ↔ 문서의 "우편 접수")만 쪼갠다.
+            # 조각은 부분 일치로 찾으므로 붙여 쓴 문서도 그대로 걸린다.
+            if len(term) >= 4 and not term.isascii() and term not in self.postings:
+                out += self._split_compound(term) or [term]
+            else:
+                out.append(term)
+        return list(dict.fromkeys(out))
+
     def scores(self, query):
         from .search import query_terms
-        full = query_terms(query)
+        full = self._expanded(query_terms(query))
         # 여러 과제를 담은 장문은 문장별 커버리지의 최댓값을 쓴다.
         # 문장 개수나 반복 횟수를 더하지 않으므로 증거가 포화하지 않는다.
         groups = [full]
         for sentence in re.split(r"(?<=[?!。])\s*|(?<=\.)\s+|\n+", query):
-            terms = query_terms(sentence)
+            terms = self._expanded(query_terms(sentence))
             if len(terms) >= 3 and terms != full:
                 groups.append(terms)
         result = []
