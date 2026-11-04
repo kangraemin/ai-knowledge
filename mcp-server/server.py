@@ -196,7 +196,7 @@ def library_search(query: str) -> str:
     from kb.search import format_results
     out = format_results(matches, token_budget=10000) if matches else f"'{query}' 관련 라이브러리 항목 없음."
     if decisions:
-        out += "\n\n## 관련 결정사항 (이미 정한 규칙 — 따른다. 요청에 맞으면 decision_read로 전문을 연다)\n" + "\n".join(
+        out += "\n\n## 관련 결정사항 (이미 정한 규칙 — 따른다. 요청과 관련 있으면 답하기 전에 decision_read로 먼저 연다. 제목·요약만 보고 답하지 않는다)\n" + "\n".join(
             f"- **{_decision_title(e)}** `{e['path']}`" + (f"\n  {d}" if (d := _decision_summary(e)) else "")
             for e in decisions)
     if said:

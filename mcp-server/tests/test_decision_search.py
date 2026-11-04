@@ -103,3 +103,7 @@ def test_search_guidance_asks_for_verbatim_message():
     import server
     assert "verbatim" in server.INSTRUCTIONS
     assert "verbatim" in server.library_search.__doc__
+
+
+def test_search_result_tells_to_open_decision_before_answering(library):
+    assert "답하기 전에 decision_read" in library.library_search("현황판 리스트 다시 갱신")
