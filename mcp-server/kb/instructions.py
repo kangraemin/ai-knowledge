@@ -15,14 +15,14 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-_SKIP_PREFIX = ("<", "[", "This session", "Base directory", "Stop hook", "Caveat:")
+_SKIP_PREFIX = ("<", "[Request interrupted", "This session", "Base directory", "Stop hook", "Caveat:")
 _HUMAN_SKIP_PREFIX = ("<command-", "<local-command", "<bash-", "[Request interrupted", "[계정 전환 재시작]")
 _CHANNEL = re.compile(r"\s*<channel[^>]*>(.*)</channel>\s*$", re.S)
 _COMMAND = re.compile(r"<command-name>\s*(/[^<\s]+)\s*</command-name>.*?<command-args>(.*?)</command-args>", re.S)
 _PASTED = re.compile(r"</?pasted_content[^>]*>")
 _IMAGE = re.compile(r"^(?:\[Image #\d+\]\s*)+")
 _MARKS = (b'"type":"user"', b'"type": "user"', b"queued_command", b"<command-args>")
-_MIN_LEN, _MAX_LEN = 6, 2000
+_MIN_LEN, _MAX_LEN = 2, 2000
 SHOW_CHARS = 220
 
 
@@ -81,7 +81,8 @@ def extract(raw):
     command = _COMMAND.search(text)
     if command:
         args = command.group(2).strip()
-        text = f"{command.group(1)} {args}" if len(args) >= _MIN_LEN else ""
+        # 인자 없는 명령과 숫자 하나짜리 설정값은 지시가 아니다.
+        text = f"{command.group(1)} {args}" if len(args) >= 6 else ""
     elif kind == "system":
         return None
     else:

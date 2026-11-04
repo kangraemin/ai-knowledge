@@ -123,7 +123,12 @@ def _line(**fields):
     (_line(type="user", origin={"kind": "human"}, message={"content": "[정정] 방금 지시 취소해"}), "[정정] 방금 지시 취소해"),
     (_line(type="user", origin={"kind": "human"}, message={"content": "<pasted_content id=\"a\">링크입니다</pasted_content id=\"a\"> 이것도 확인해봐"}), "링크입니다 이것도 확인해봐"),
     (_line(type="user", isMeta=True, origin={"kind": "channel"}, message={"content": "<channel source=\"t\">폰에서 보낸 지시</channel>"}), "폰에서 보낸 지시"),
+    # 짧은 말과 origin 없는 옛 형식의 말머리도 사람 말
+    (_line(type="user", origin={"kind": "human"}, message={"content": "ㅇㅇ"}), "ㅇㅇ"),
+    (_line(type="user", origin={"kind": "human"}, message={"content": "계속해"}), "계속해"),
+    (_line(type="user", message={"content": "[정정] 그거 아니고 저거로 해"}), "[정정] 그거 아니고 저거로 해"),
     # 사람 말이 아닌 줄
+    (_line(type="user", origin={"kind": "human"}, message={"content": "ㅇ"}), None),
     (_line(type="user", message={"content": "[Request interrupted by user]"}), None),
     (_line(type="user", message={"content": "This session is being continued from a previous"}), None),
     (_line(type="user", isMeta=True, message={"content": "Stop hook feedback 내용입니다"}), None),
