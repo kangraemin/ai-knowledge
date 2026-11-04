@@ -260,7 +260,7 @@ def _current_repos() -> set[str]:
     return {_current_repo(), top.rstrip("/").rsplit("/", 1)[-1]} - {""}
 
 
-def _related_decisions(query: str, k=3) -> list[dict]:
+def _related_decisions(query: str, k=5) -> list[dict]:
     """공통(_global)과 현재 레포 결정만 본다. 다른 레포 결정은 단어만 겹쳐도 엉뚱하게 붙는다."""
     from kb.relevance import Corpus, DEFAULT_MIN_SCORE
     scope = {"_global"} | _current_repos()

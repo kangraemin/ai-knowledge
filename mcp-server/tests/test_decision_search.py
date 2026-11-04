@@ -90,3 +90,10 @@ def test_related_decisions_use_local_folder_name(monkeypatch, tmp_path):
     monkeypatch.chdir(repo)
     assert server._current_repos() == {"other-remote", "contests"}
     assert any("board-update" in e["path"] for e in server._related_decisions("현황판 리스트 다시 갱신"))
+
+
+def test_related_decisions_show_five(library):
+    root = library.LIBRARY_ROOT
+    for i in range(7):
+        write(root, "contests", "process", f"board-{i}", f"현황판 규칙 {i}", "현황판 내용")
+    assert len(library._related_decisions("현황판 규칙")) == 5
